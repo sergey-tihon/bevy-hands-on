@@ -1,0 +1,13 @@
+[package]
+name = "bevy-hands-on"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = ["hello_bevy"]
+
+[workspace.dependencies]
+bevy = { version = "0.15.1", features = ["wayland"] }
+
+[dependencies]
+bevy.workspace = true
