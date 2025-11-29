@@ -7,7 +7,7 @@ edition = "2024"
 members = ["hello_bevy"]
 
 [workspace.dependencies]
-bevy = { version = "0.15.1", features = ["wayland"] }
+bevy = { version = "0.15", features = ["wayland"] }
 
 [dependencies]
 bevy.workspace = true
