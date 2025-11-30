@@ -1,4 +1,4 @@
-use bevy::{input::keyboard, prelude::*};
+use bevy::prelude::*;
 
 #[derive(Component)]
 struct Dragon;
