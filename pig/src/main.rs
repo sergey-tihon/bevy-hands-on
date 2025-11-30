@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
+use bevy_egui::{EguiContexts, EguiPlugin, egui};
 use my_library::RandomNumberGenerator;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Default, States)]
@@ -180,8 +180,8 @@ fn cpu(
             }
         } else {
             scores.cpu += hand_total;
-            state.set(GamePhase::Player);
             clear_die(&hand_query, &mut commands);
+            state.set(GamePhase::Player);
         }
     }
 }
