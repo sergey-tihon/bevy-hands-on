@@ -1,4 +1,5 @@
 use rand::{Rng, SeedableRng, distributions::uniform::SampleRange};
+use std::sync::Mutex;
 
 pub use rand;
 
@@ -13,34 +14,36 @@ type RngCore = rand_xorshift::XorShiftRng;
 
 #[derive(bevy::prelude::Resource)]
 pub struct RandomNumberGenerator {
-    rng: RngCore,
+    rng: Mutex<RngCore>,
 }
 
 impl RandomNumberGenerator {
     pub fn new() -> Self {
         Self {
-            rng: RngCore::from_entropy(),
+            rng: Mutex::new(RngCore::from_entropy()),
         }
     }
 
     pub fn seeded(seed: u64) -> Self {
         Self {
-            rng: RngCore::seed_from_u64(seed),
+            rng: Mutex::new(RngCore::seed_from_u64(seed)),
         }
     }
 
-    pub fn range<T>(&mut self, range: impl SampleRange<T>) -> T
+    pub fn range<T>(&self, range: impl SampleRange<T>) -> T
     where
         T: rand::distributions::uniform::SampleUniform + PartialOrd,
     {
-        self.rng.gen_range(range)
+        let mut lock = self.rng.lock().unwrap();
+        lock.gen_range(range)
     }
 
-    pub fn next<T>(&mut self) -> T
+    pub fn next<T>(&self) -> T
     where
         rand::distributions::Standard: rand::prelude::Distribution<T>,
     {
-        self.rng.r#gen()
+        let mut lock = self.rng.lock().unwrap();
+        lock.r#gen()
     }
 }
 
@@ -64,7 +67,7 @@ mod tests {
 
     #[test]
     fn test_range_bounds() {
-        let mut rng = RandomNumberGenerator::new();
+        let rng = RandomNumberGenerator::new();
         for _ in 0..1000 {
             let num = rng.range(10..20);
             assert!((10..20).contains(&num));
@@ -73,8 +76,8 @@ mod tests {
 
     #[test]
     fn test_seeded_reproducibility() {
-        let mut rng1 = RandomNumberGenerator::seeded(42);
-        let mut rng2 = RandomNumberGenerator::seeded(42);
+        let rng1 = RandomNumberGenerator::seeded(42);
+        let rng2 = RandomNumberGenerator::seeded(42);
 
         for _ in 0..1000 {
             assert_eq!(
@@ -86,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_next_types() {
-        let mut rng = RandomNumberGenerator::new();
+        let rng = RandomNumberGenerator::new();
         let _: i32 = rng.next();
         let _: f64 = rng.next();
         let _ = rng.next::<usize>();
@@ -94,7 +97,7 @@ mod tests {
 
     #[test]
     fn test_floating_point() {
-        let mut rng = RandomNumberGenerator::new();
+        let rng = RandomNumberGenerator::new();
         for _ in 0..1000 {
             let n = rng.range(-5000.0f32..5000.0f32);
             assert!(n.is_finite());
