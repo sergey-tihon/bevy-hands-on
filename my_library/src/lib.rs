@@ -27,6 +27,10 @@
 /// is re-exported for your convenience.
 pub use rand;
 
+mod bevy_framework;
+/// Re-export Bevy-related functionality.
+pub use bevy_framework::*;
+
 #[cfg(not(feature = "locking"))]
 mod random;
 #[cfg(not(feature = "locking"))]
