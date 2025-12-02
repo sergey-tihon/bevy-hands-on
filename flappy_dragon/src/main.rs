@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use my_library::*;
 
-#[derive(Clone, PartialEq, Eq, Debug, Hash, Default, States)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash, Default, States, Copy)]
 enum GamePhase {
     MainMenu,
     #[default]
@@ -61,7 +61,7 @@ fn setup(
         wall: asset_server.load("wall.png"),
     };
 
-    commands.spawn(Camera2d::default()).insert(FlappyElement);
+    commands.spawn(Camera2d).insert(FlappyElement);
     commands
         .spawn((
             Sprite::from_image(assets.dragon.clone()),
@@ -95,10 +95,10 @@ fn gravity(mut query: Query<(&mut Flappy, &mut Transform)>) {
 }
 
 fn flap(keyboard: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Flappy>) {
-    if keyboard.pressed(KeyCode::Space) {
-        if let Ok(mut flappy) = query.single_mut() {
-            flappy.gravity = -5.0;
-        }
+    if keyboard.pressed(KeyCode::Space)
+        && let Ok(mut flappy) = query.single_mut()
+    {
+        flappy.gravity = -5.0;
     }
 }
 
