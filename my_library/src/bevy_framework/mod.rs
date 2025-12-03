@@ -84,3 +84,17 @@ fn setup_menus(mut commands: Commands, asset_server: Res<AssetServer>) {
     };
     commands.insert_resource(assets);
 }
+
+#[macro_export]
+macro_rules! add_phase {
+  (
+    $app:expr, $type:ty, $phase:expr,
+    start => [$($start_system:expr),* ],
+    run => [$($run_system:expr),* ],
+    exit => [$($exit_system:expr),* ]
+  ) => {
+        $($app.add_systems(bevy::prelude::OnEnter::<$type>($phase), $start_system);)*
+        $($app.add_systems(bevy::prelude::Update, $run_system.run_if(in_state($phase)));)*
+        $($app.add_systems(bevy::prelude::OnExit::<$type>($phase), $exit_system);)*
+  };
+}
