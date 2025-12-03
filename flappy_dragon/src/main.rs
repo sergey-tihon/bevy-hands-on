@@ -3,8 +3,8 @@ use my_library::*;
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Default, States, Copy)]
 enum GamePhase {
-    MainMenu,
     #[default]
+    MainMenu,
     Flapping,
     GameOver,
 }
@@ -95,7 +95,7 @@ fn gravity(mut query: Query<(&mut Flappy, &mut Transform)>) {
 }
 
 fn flap(keyboard: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Flappy>) {
-    if keyboard.pressed(KeyCode::Space)
+    if keyboard.just_pressed(KeyCode::Space)
         && let Ok(mut flappy) = query.single_mut()
     {
         flappy.gravity = -5.0;
