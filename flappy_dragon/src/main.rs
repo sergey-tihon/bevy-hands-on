@@ -17,16 +17,10 @@ struct Flappy {
 #[derive(Component)]
 struct Obstacle;
 
-#[derive(Resource)]
-struct Assets {
-    dragon: Handle<Image>,
-    wall: Handle<Image>,
-}
-
 #[derive(Component)]
 struct FlappyElement;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let mut app = App::new();
 
     add_phase!(app, GamePhase, GamePhase::Flapping,
@@ -55,37 +49,45 @@ fn main() {
         GamePhase::Flapping,
         GamePhase::GameOver,
     ))
+    .add_plugins(
+        AssetManager::new()
+            .add_image("dragon", "flappy_dragon.png")?
+            .add_image("wall", "wall.png")?,
+    )
     .run();
+
+    Ok(())
 }
 
 fn setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut rng: ResMut<RandomNumberGenerator>,
+    assets: Res<AssetStore>,
+    loaded_assets: AssetResource,
 ) {
-    let assets = Assets {
-        dragon: asset_server.load("flappy_dragon.png"),
-        wall: asset_server.load("wall.png"),
-    };
-
     commands.spawn(Camera2d).insert(FlappyElement);
+
     commands
         .spawn((
-            Sprite::from_image(assets.dragon.clone()),
+            Sprite::from_image(assets.get_handle("dragon", &loaded_assets).unwrap()),
             Transform::from_xyz(-490.0, 0.0, 1.0),
             Flappy { gravity: 0.0 },
         ))
         .insert(FlappyElement);
 
-    build_wall(&mut commands, assets.wall.clone(), rng.range(-5..5));
-    commands.insert_resource(assets);
+    build_wall(&mut commands, &assets, rng.range(-5..5), &loaded_assets);
 }
 
-fn build_wall(commands: &mut Commands, wall_sprite: Handle<Image>, gap_y: i32) {
+fn build_wall(
+    commands: &mut Commands,
+    assets: &AssetStore,
+    gap_y: i32,
+    loaded_assets: &AssetResource,
+) {
     for y in -12..=12 {
         if y < gap_y - 4 || y > gap_y + 4 {
             commands.spawn((
-                Sprite::from_image(wall_sprite.clone()),
+                Sprite::from_image(assets.get_handle("wall", loaded_assets).unwrap()),
                 Transform::from_xyz(512.0, y as f32 * 32.0, 1.0),
                 Obstacle,
                 FlappyElement,
@@ -123,8 +125,9 @@ fn move_walls(
     mut commands: Commands,
     mut query: Query<&mut Transform, With<Obstacle>>,
     delete: Query<Entity, With<Obstacle>>,
-    assets: Res<Assets>,
     mut rng: ResMut<RandomNumberGenerator>,
+    assets: Res<AssetStore>,
+    loaded_assets: AssetResource,
 ) {
     let mut rebuild = false;
     for mut transform in query.iter_mut() {
@@ -137,7 +140,7 @@ fn move_walls(
         for entity in delete.iter() {
             commands.entity(entity).despawn();
         }
-        build_wall(&mut commands, assets.wall.clone(), rng.range(-5..5));
+        build_wall(&mut commands, &assets, rng.range(-5..5), &loaded_assets);
     }
 }
 

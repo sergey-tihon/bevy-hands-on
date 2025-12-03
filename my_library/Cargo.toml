@@ -8,6 +8,7 @@ harness = false
 name = "random"
 
 [dependencies]
+anyhow = "1"
 bevy = { workspace = true }
 rand = { workspace = true }
 rand_pcg = { workspace = true, optional = true }
