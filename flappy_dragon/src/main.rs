@@ -4,6 +4,7 @@ use my_library::*;
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Default, States, Copy)]
 enum GamePhase {
     #[default]
+    Loading,
     MainMenu,
     Flapping,
     GameOver,
@@ -17,16 +18,10 @@ struct Flappy {
 #[derive(Component)]
 struct Obstacle;
 
-#[derive(Resource)]
-struct Assets {
-    dragon: Handle<Image>,
-    wall: Handle<Image>,
-}
-
 #[derive(Component)]
 struct FlappyElement;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let mut app = App::new();
 
     add_phase!(app, GamePhase, GamePhase::Flapping,
@@ -55,41 +50,60 @@ fn main() {
         GamePhase::Flapping,
         GamePhase::GameOver,
     ))
+    .add_plugins(
+        AssetManager::new()
+            .add_image("dragon", "flappy_dragon.png")?
+            .add_image("wall", "wall.png")?
+            .add_sound("flap", "dragonflap.ogg")?
+            .add_sound("crash", "crash.ogg")?,
+    )
     .run();
+
+    Ok(())
 }
 
 fn setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut rng: ResMut<RandomNumberGenerator>,
+    assets: Res<AssetStore>,
+    loaded_assets: AssetResource,
 ) {
-    let assets = Assets {
-        dragon: asset_server.load("flappy_dragon.png"),
-        wall: asset_server.load("wall.png"),
-    };
-
     commands.spawn(Camera2d).insert(FlappyElement);
-    commands
-        .spawn((
-            Sprite::from_image(assets.dragon.clone()),
-            Transform::from_xyz(-490.0, 0.0, 1.0),
-            Flappy { gravity: 0.0 },
-        ))
-        .insert(FlappyElement);
 
-    build_wall(&mut commands, assets.wall.clone(), rng.range(-5..5));
-    commands.insert_resource(assets);
+    spawn_image!(
+        assets,
+        commands,
+        "dragon",
+        -490.0,
+        0.0,
+        1.0,
+        &loaded_assets,
+        Flappy { gravity: 0.0 },
+        FlappyElement
+    );
+
+    build_wall(&mut commands, &assets, rng.range(-5..5), &loaded_assets);
 }
 
-fn build_wall(commands: &mut Commands, wall_sprite: Handle<Image>, gap_y: i32) {
+fn build_wall(
+    commands: &mut Commands,
+    assets: &AssetStore,
+    gap_y: i32,
+    loaded_assets: &AssetResource,
+) {
     for y in -12..=12 {
         if y < gap_y - 4 || y > gap_y + 4 {
-            commands.spawn((
-                Sprite::from_image(wall_sprite.clone()),
-                Transform::from_xyz(512.0, y as f32 * 32.0, 1.0),
+            spawn_image!(
+                assets,
+                commands,
+                "wall",
+                512.0,
+                y as f32 * 32.0,
+                1.0,
+                loaded_assets,
                 Obstacle,
-                FlappyElement,
-            ));
+                FlappyElement
+            );
         }
     }
 }
@@ -101,11 +115,18 @@ fn gravity(mut query: Query<(&mut Flappy, &mut Transform)>) {
     }
 }
 
-fn flap(keyboard: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Flappy>) {
+fn flap(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Flappy>,
+    assets: Res<AssetStore>,
+    loaded: Res<LoadedAssets>,
+    mut commands: Commands,
+) {
     if keyboard.just_pressed(KeyCode::Space)
         && let Ok(mut flappy) = query.single_mut()
     {
         flappy.gravity = -5.0;
+        assets.play("flap", &mut commands, &loaded);
     }
 }
 
@@ -123,8 +144,9 @@ fn move_walls(
     mut commands: Commands,
     mut query: Query<&mut Transform, With<Obstacle>>,
     delete: Query<Entity, With<Obstacle>>,
-    assets: Res<Assets>,
     mut rng: ResMut<RandomNumberGenerator>,
+    assets: Res<AssetStore>,
+    loaded_assets: AssetResource,
 ) {
     let mut rebuild = false;
     for mut transform in query.iter_mut() {
@@ -137,7 +159,7 @@ fn move_walls(
         for entity in delete.iter() {
             commands.entity(entity).despawn();
         }
-        build_wall(&mut commands, assets.wall.clone(), rng.range(-5..5));
+        build_wall(&mut commands, &assets, rng.range(-5..5), &loaded_assets);
     }
 }
 
@@ -145,11 +167,15 @@ fn hit_wall(
     player: Query<&Transform, With<Flappy>>,
     walls: Query<&Transform, With<Obstacle>>,
     mut state: ResMut<NextState<GamePhase>>,
+    assets: Res<AssetStore>,
+    loaded: Res<LoadedAssets>,
+    mut commands: Commands,
 ) {
     if let Ok(player) = player.single() {
         for wall in walls.iter() {
             let distance = player.translation.distance(wall.translation);
             if distance < 32.0 {
+                assets.play("crash", &mut commands, &loaded);
                 state.set(GamePhase::GameOver);
             }
         }

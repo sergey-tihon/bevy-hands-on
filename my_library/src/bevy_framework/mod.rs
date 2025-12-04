@@ -1,5 +1,7 @@
 use bevy::{prelude::*, state::state::FreelyMutableState};
 
+use crate::bevy_assets;
+
 mod game_menus;
 
 pub struct GameStatePlugin<T> {
@@ -24,11 +26,14 @@ where
 
 impl<T> Plugin for GameStatePlugin<T>
 where
-    T: States + Copy + FromWorld + FreelyMutableState,
+    T: States + Copy + FromWorld + FreelyMutableState + Default,
 {
     fn build(&self, app: &mut App) {
         app.init_state::<T>();
-        app.add_systems(Startup, setup_menus);
+        app.add_plugins(bevy_egui::EguiPlugin {
+            enable_multipass_for_primary_context: false,
+        });
+
         let start = MenuResource {
             menu_state: self.menu_state,
             game_start_state: self.game_start_state,
@@ -52,6 +57,10 @@ where
             OnExit(self.game_end_state),
             cleanup::<game_menus::MenuElement>,
         );
+
+        app.add_systems(OnEnter(T::default()), crate::bevy_assets::setup);
+        app.add_systems(Update, bevy_assets::run::<T>.run_if(in_state(T::default())));
+        app.add_systems(OnExit(T::default()), crate::bevy_assets::exit);
     }
 }
 
@@ -75,14 +84,6 @@ pub(crate) struct MenuResource<T> {
     pub(crate) menu_state: T,
     pub(crate) game_start_state: T,
     pub(crate) game_end_state: T,
-}
-
-fn setup_menus(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let assets = MenuAssets {
-        main_menu: asset_server.load("main_menu.png"),
-        game_over: asset_server.load("game_over.png"),
-    };
-    commands.insert_resource(assets);
 }
 
 #[macro_export]
