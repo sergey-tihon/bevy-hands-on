@@ -15,7 +15,18 @@ pub struct AssetManager {
 impl AssetManager {
     pub fn new() -> Self {
         Self {
-            asset_list: Vec::new(),
+            asset_list: vec![
+                (
+                    "main_menu".to_string(),
+                    "main_menu.png".to_string(),
+                    AssetType::Image,
+                ),
+                (
+                    "game_over".to_string(),
+                    "game_over.png".to_string(),
+                    AssetType::Image,
+                ),
+            ],
         }
     }
 
@@ -44,15 +55,15 @@ impl AssetManager {
 impl Plugin for AssetManager {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.clone());
-        app.add_systems(Startup, setup);
+        //app.add_systems(Startup, setup);
     }
 }
 
-fn setup(
-    asset_resource: Res<AssetManager>,
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-) {
+pub(crate) fn setup_asset_store(
+    asset_resource: &AssetManager,
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+) -> AssetStore {
     let mut assets = AssetStore {
         asset_index: bevy::platform::collections::HashMap::new(),
     };
@@ -70,5 +81,7 @@ fn setup(
         });
 
     commands.remove_resource::<AssetManager>();
-    commands.insert_resource(assets);
+    commands.insert_resource(assets.clone());
+
+    assets
 }

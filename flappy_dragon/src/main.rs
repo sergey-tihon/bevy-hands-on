@@ -4,6 +4,7 @@ use my_library::*;
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Default, States, Copy)]
 enum GamePhase {
     #[default]
+    Loading,
     MainMenu,
     Flapping,
     GameOver,

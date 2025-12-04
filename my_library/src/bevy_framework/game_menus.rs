@@ -1,6 +1,6 @@
 use bevy::{prelude::*, state::state::FreelyMutableState};
 
-use crate::{MenuAssets, MenuResource};
+use crate::{AssetResource, AssetStore, MenuResource};
 
 #[derive(Component)]
 pub(crate) struct MenuElement;
@@ -9,21 +9,17 @@ pub(crate) fn setup<T>(
     state: Res<State<T>>,
     mut commands: Commands,
     menu_resource: Res<MenuResource<T>>,
-    asset_server: Res<AssetServer>,
+    loaded_assets: AssetResource,
+    assets: Res<AssetStore>,
 ) where
     T: States + FromWorld + FreelyMutableState,
 {
-    let menu_assets = MenuAssets {
-        main_menu: asset_server.load("main_menu.png"),
-        game_over: asset_server.load("game_over.png"),
-    };
-
     let current_state = state.get();
     let menu_graphic = {
         if menu_resource.menu_state == *current_state {
-            menu_assets.main_menu.clone()
+            assets.get_handle("main_menu", &loaded_assets).unwrap()
         } else if menu_resource.game_end_state == *current_state {
-            menu_assets.game_over.clone()
+            assets.get_handle("game_over", &loaded_assets).unwrap()
         } else {
             panic!("Unknown menu state")
         }
