@@ -5,6 +5,7 @@ use crate::AssetStore;
 #[derive(Clone)]
 pub enum AssetType {
     Image,
+    Sound,
 }
 
 #[derive(Resource, Clone)]
@@ -30,9 +31,7 @@ impl AssetManager {
         }
     }
 
-    pub fn add_image<S: ToString>(mut self, tag: S, filename: S) -> anyhow::Result<Self> {
-        let filename = filename.to_string();
-
+    fn asset_exists(filename: &str) -> anyhow::Result<()> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let current_directory = std::env::current_dir()?;
@@ -40,14 +39,29 @@ impl AssetManager {
             let new_image = assets.join(&filename);
             if !new_image.exists() {
                 return Err(anyhow::anyhow!(
-                    "Image asset file does not exist: {}",
-                    new_image.display()
+                    "{} not found in assets directory",
+                    &filename
                 ));
             }
         }
+        Ok(())
+    }
+
+    pub fn add_image<S: ToString>(mut self, tag: S, filename: S) -> anyhow::Result<Self> {
+        let filename = filename.to_string();
+        AssetManager::asset_exists(&filename)?;
 
         self.asset_list
             .push((tag.to_string(), filename, AssetType::Image));
+        Ok(self)
+    }
+
+    pub fn add_sound<S: ToString>(mut self, tag: S, filename: S) -> anyhow::Result<Self> {
+        let filename = filename.to_string();
+        AssetManager::asset_exists(&filename)?;
+
+        self.asset_list
+            .push((tag.to_string(), filename, AssetType::Sound));
         Ok(self)
     }
 }

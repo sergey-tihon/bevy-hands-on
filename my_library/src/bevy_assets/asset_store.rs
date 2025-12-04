@@ -26,4 +26,9 @@ impl AssetStore {
             None
         }
     }
+
+    pub fn play(&self, sound_name: &str, commands: &mut Commands, assets: &LoadedAssets) {
+        let sound_handle: Handle<AudioSource> = self.get_handle(sound_name, assets).unwrap();
+        commands.spawn(AudioPlayer::new(sound_handle.clone()));
+    }
 }
