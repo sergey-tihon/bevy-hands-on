@@ -7,6 +7,9 @@ pub use asset_store::*;
 mod loading_menu;
 pub use loading_menu::*;
 
+mod bevy_animation;
+pub use bevy_animation::*;
+
 #[macro_export]
 macro_rules! spawn_image {
     ($assets:expr, $commands:expr, $index:expr, $x:expr, $y:expr, $z: expr, $resource:expr, $($component:expr),*) => {
