@@ -1,6 +1,9 @@
 use bevy::{prelude::*, state::state::FreelyMutableState};
 
-use crate::bevy_assets;
+use crate::{bevy_assets, bevy_framework::bevy_physics::*};
+
+mod bevy_physics;
+pub use bevy_physics::*;
 
 mod game_menus;
 
@@ -33,6 +36,9 @@ where
         app.add_plugins(bevy_egui::EguiPlugin {
             enable_multipass_for_primary_context: false,
         });
+
+        app.add_event::<PhysicsTick>();
+        app.add_event::<Impulse>();
 
         let start = MenuResource {
             menu_state: self.menu_state,
