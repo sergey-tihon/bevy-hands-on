@@ -11,9 +11,7 @@ enum GamePhase {
 }
 
 #[derive(Component)]
-struct Flappy {
-    gravity: f32,
-}
+struct Flappy;
 
 #[derive(Component)]
 struct Obstacle;
@@ -27,11 +25,16 @@ fn main() -> anyhow::Result<()> {
     add_phase!(app, GamePhase, GamePhase::Flapping,
         start => [setup],
         run => [
-            gravity,
             flap,
             clamp,
             move_walls,
-            hit_wall
+            hit_wall,
+            cycle_animations,
+            continual_parallax,
+            physics_clock,
+            sum_impulses,
+            apply_gravity,
+            apply_velocity
         ],
         exit => [cleanup::<FlappyElement>]
     );
@@ -55,7 +58,46 @@ fn main() -> anyhow::Result<()> {
             .add_image("dragon", "flappy_dragon.png")?
             .add_image("wall", "wall.png")?
             .add_sound("flap", "dragonflap.ogg")?
-            .add_sound("crash", "crash.ogg")?,
+            .add_sound("crash", "crash.ogg")?
+            .add_sprite_sheet("flappy", "flappy_sprite_sheet.png", 62.0, 65.0, 4, 1)?
+            .add_image("bg_static", "rocky-far-mountains.png")?
+            .add_image("bg_far", "rocky-nowater-far.png")?
+            .add_image("bg_mid", "rocky-nowater-mid.png")?
+            .add_image("bg_close", "rocky-nowater-close.png")?,
+    )
+    .insert_resource(
+        Animations::new()
+            .with_animation(
+                "Straight and Level",
+                PerFrameAnimation::new(vec![
+                    AnimationFrame::new(2, 500, vec![AnimationOption::NextFrame]),
+                    AnimationFrame::new(3, 500, vec![AnimationOption::GoToFrame(0)]),
+                ]),
+            )
+            .with_animation(
+                "Flapping",
+                PerFrameAnimation::new(vec![
+                    AnimationFrame::new(
+                        0,
+                        66,
+                        vec![
+                            AnimationOption::NextFrame,
+                            AnimationOption::PlaySound("flap".to_string()),
+                        ],
+                    ),
+                    AnimationFrame::new(1, 66, vec![AnimationOption::NextFrame]),
+                    AnimationFrame::new(2, 66, vec![AnimationOption::NextFrame]),
+                    AnimationFrame::new(3, 66, vec![AnimationOption::NextFrame]),
+                    AnimationFrame::new(2, 66, vec![AnimationOption::NextFrame]),
+                    AnimationFrame::new(
+                        1,
+                        66,
+                        vec![AnimationOption::SwitchToAnimation(
+                            "Straight and Level".to_string(),
+                        )],
+                    ),
+                ]),
+            ),
     )
     .run();
 
@@ -70,19 +112,100 @@ fn setup(
 ) {
     commands.spawn(Camera2d).insert(FlappyElement);
 
-    spawn_image!(
+    spawn_animated_sprite!(
         assets,
         commands,
-        "dragon",
+        "flappy",
         -490.0,
         0.0,
-        1.0,
-        &loaded_assets,
-        Flappy { gravity: 0.0 },
-        FlappyElement
+        10.0,
+        "Straight and Level",
+        Flappy,
+        FlappyElement,
+        Velocity::default(),
+        ApplyGravity
     );
 
     build_wall(&mut commands, &assets, rng.range(-5..5), &loaded_assets);
+
+    spawn_image!(
+        assets,
+        commands,
+        "bg_static",
+        0.0,
+        0.0,
+        1.0,
+        &loaded_assets,
+        FlappyElement
+    );
+    spawn_image!(
+        assets,
+        commands,
+        "bg_far",
+        0.0,
+        0.0,
+        2.0,
+        &loaded_assets,
+        FlappyElement,
+        ContinualParallax::new(1280.0, 66, Vec2::new(1.0, 0.0))
+    );
+    spawn_image!(
+        assets,
+        commands,
+        "bg_far",
+        1280.0,
+        0.0,
+        2.0,
+        &loaded_assets,
+        FlappyElement,
+        ContinualParallax::new(1280.0, 66, Vec2::new(1.0, 0.0))
+    );
+
+    spawn_image!(
+        assets,
+        commands,
+        "bg_mid",
+        0.0,
+        0.0,
+        3.0,
+        &loaded_assets,
+        FlappyElement,
+        ContinualParallax::new(1280.0, 66, Vec2::new(1.0, 0.0))
+    );
+    spawn_image!(
+        assets,
+        commands,
+        "bg_mid",
+        1280.0,
+        0.0,
+        3.0,
+        &loaded_assets,
+        FlappyElement,
+        ContinualParallax::new(1280.0, 66, Vec2::new(1.0, 0.0))
+    );
+
+    spawn_image!(
+        assets,
+        commands,
+        "bg_close",
+        0.0,
+        0.0,
+        4.0,
+        &loaded_assets,
+        FlappyElement,
+        ContinualParallax::new(1280.0, 66, Vec2::new(2.0, 0.0))
+    );
+    spawn_image!(
+        assets,
+        commands,
+        "bg_close",
+        1280.0,
+        0.0,
+        4.0,
+        &loaded_assets,
+        FlappyElement,
+        ContinualParallax::new(1280.0, 66, Vec2::new(2.0, 0.0))
+    );
 }
 
 fn build_wall(
@@ -99,34 +222,31 @@ fn build_wall(
                 "wall",
                 512.0,
                 y as f32 * 32.0,
-                1.0,
+                10.0,
                 loaded_assets,
                 Obstacle,
-                FlappyElement
+                FlappyElement,
+                Velocity::new(-4.0, 0.0, 0.0)
             );
         }
     }
 }
 
-fn gravity(mut query: Query<(&mut Flappy, &mut Transform)>) {
-    if let Ok((mut flappy, mut transform)) = query.single_mut() {
-        flappy.gravity += 0.1;
-        transform.translation.y -= flappy.gravity;
-    }
-}
-
 fn flap(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Flappy>,
-    assets: Res<AssetStore>,
-    loaded: Res<LoadedAssets>,
-    mut commands: Commands,
+    mut query: Query<(Entity, &mut AnimationCycle)>,
+    mut impulse: EventWriter<Impulse>,
 ) {
     if keyboard.just_pressed(KeyCode::Space)
-        && let Ok(mut flappy) = query.single_mut()
+        && let Ok((flappy, mut animation)) = query.single_mut()
     {
-        flappy.gravity = -5.0;
-        assets.play("flap", &mut commands, &loaded);
+        impulse.write(Impulse {
+            target: flappy,
+            amount: Vec3::Y * 5.0,
+            absolute: true,
+            source: 1,
+        });
+        animation.switch("Flapping");
     }
 }
 
@@ -142,19 +262,19 @@ fn clamp(mut query: Query<&mut Transform, With<Flappy>>, mut state: ResMut<NextS
 
 fn move_walls(
     mut commands: Commands,
-    mut query: Query<&mut Transform, With<Obstacle>>,
+    mut query: Query<&Transform, With<Obstacle>>,
     delete: Query<Entity, With<Obstacle>>,
     mut rng: ResMut<RandomNumberGenerator>,
     assets: Res<AssetStore>,
     loaded_assets: AssetResource,
 ) {
     let mut rebuild = false;
-    for mut transform in query.iter_mut() {
-        transform.translation.x -= 4.0;
+    for transform in query.iter_mut() {
         if transform.translation.x < -530.0 {
             rebuild = true;
         }
     }
+
     if rebuild {
         for entity in delete.iter() {
             commands.entity(entity).despawn();
