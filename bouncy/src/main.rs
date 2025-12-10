@@ -26,6 +26,51 @@ struct CollisionTime {
     fps: f64,
 }
 
+#[derive(Component)]
+struct AxisAlignedBoundingBox {
+    half_size: Vec2,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Rect2D {
+    min: Vec2,
+    max: Vec2,
+}
+
+impl AxisAlignedBoundingBox {
+    pub fn new(width: f32, height: f32) -> Self {
+        Self {
+            half_size: Vec2::new(width / 2.0, height / 2.0),
+        }
+    }
+
+    fn as_rect(&self, translate: Vec2) -> Rect2D {
+        Rect2D::new(
+            Vec2::new(
+                translate.x - self.half_size.x,
+                translate.y - self.half_size.y,
+            ),
+            Vec2::new(
+                translate.x + self.half_size.x,
+                translate.y + self.half_size.y,
+            ),
+        )
+    }
+}
+
+impl Rect2D {
+    pub fn new(min: Vec2, max: Vec2) -> Self {
+        Self { min, max }
+    }
+
+    pub fn intersects(&self, other: &Rect2D) -> bool {
+        self.min.x < other.max.x
+            && self.max.x > other.min.x
+            && self.min.y < other.max.y
+            && self.max.y > other.min.y
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let mut app = App::new();
     add_phase!(app, GamePhase, GamePhase::Bouncing,
@@ -78,6 +123,7 @@ fn spawn_bouncies(
             &loaded_assets,
             BouncyElement,
             Velocity::new(velocity.x, velocity.y, velocity.z),
+            AxisAlignedBoundingBox::new(8.0, 8.0),
             Ball
         );
     }
@@ -182,7 +228,7 @@ fn bounce_on_collision(
         target: entity,
         amount: a_to_b / 8.0, //<callout id="bouncy.div_dist" />
         absolute: false,
-        source: 0,
+        source: ball_a.x as i32,
     });
 }
 //END: bounce_on_collision
@@ -190,7 +236,7 @@ fn bounce_on_collision(
 //START: collisions
 fn collisions(
     mut collision_time: ResMut<CollisionTime>,
-    query: Query<(Entity, &Transform), With<Ball>>,
+    query: Query<(Entity, &Transform, &AxisAlignedBoundingBox)>,
     mut impulse: EventWriter<Impulse>,
 ) {
     // Start the clock
@@ -198,22 +244,22 @@ fn collisions(
 
     // Naïve Collision
     let mut n = 0;
-    for (entity_a, ball_a) in query.iter() {
-        query
-            .iter()
-            .filter(|(entity_b, _)| *entity_b != entity_a)
-            .filter(|(_, ball_b)| {
+    for (entity_a, ball_a, box_a) in query.iter() {
+        let box_a = box_a.as_rect(ball_a.translation.truncate());
+        for (entity_b, ball_b, box_b) in query.iter() {
+            if entity_a != entity_b {
+                let box_b = box_b.as_rect(ball_b.translation.truncate());
+                if box_a.intersects(&box_b) {
+                    bounce_on_collision(
+                        entity_a,
+                        ball_a.translation,
+                        ball_b.translation,
+                        &mut impulse,
+                    );
+                }
                 n += 1; // Count the collision check
-                ball_a.translation.distance(ball_b.translation) < 8.0
-            })
-            .for_each(|(_, ball_b)| {
-                bounce_on_collision(
-                    entity_a,
-                    ball_a.translation,
-                    ball_b.translation,
-                    &mut impulse,
-                );
-            });
+            }
+        }
     }
 
     // Store the time result
@@ -221,4 +267,3 @@ fn collisions(
     collision_time.checks = n;
 }
 //END: collisions
-
