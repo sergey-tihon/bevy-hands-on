@@ -5,6 +5,9 @@ use crate::{bevy_assets, bevy_framework::bevy_physics::*};
 mod bevy_physics;
 pub use bevy_physics::*;
 
+mod bevy_collision;
+pub use bevy_collision::*;
+
 mod game_menus;
 
 pub struct GameStatePlugin<T> {
