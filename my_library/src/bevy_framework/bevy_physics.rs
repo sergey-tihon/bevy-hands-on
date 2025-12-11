@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use bevy::prelude::*;
 
 // How frequently should physics be updated (in ms)
@@ -47,15 +45,15 @@ pub struct Impulse {
     pub source: i32,
 }
 
-pub fn sum_impulses(mut impulses: EventReader<Impulse>, mut velocoties: Query<&mut Velocity>) {
-    let mut dedupe_by_source = HashMap::new();
+pub fn sum_impulses(mut impulses: EventReader<Impulse>, mut velocities: Query<&mut Velocity>) {
+    let mut dedupe_by_source = std::collections::HashMap::new();
     for impulse in impulses.read() {
         dedupe_by_source.insert(impulse.source, impulse);
     }
 
-    let mut absolute = HashSet::new();
+    let mut absolute = std::collections::HashSet::new();
     for (_, impulse) in dedupe_by_source {
-        if let Ok(mut velocity) = velocoties.get_mut(impulse.target) {
+        if let Ok(mut velocity) = velocities.get_mut(impulse.target) {
             if absolute.contains(&impulse.target) {
                 continue;
             }
