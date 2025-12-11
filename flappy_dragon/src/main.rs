@@ -126,7 +126,8 @@ fn setup(
         FlappyElement,
         Velocity::default(),
         ApplyGravity,
-        AxisAlignedBoundingBox::new(62.0, 65.0)
+        AxisAlignedBoundingBox::new(62.0, 65.0),
+        PhysicsPosition::new(Vec2::new(-490.0, 0.0))
     );
 
     commands.insert_resource(StaticQuadTree::new(Vec2::new(1024.0, 768.0), 5));
@@ -232,7 +233,8 @@ fn build_wall(
                 Obstacle,
                 FlappyElement,
                 Velocity::new(-4.0, 0.0, 0.0),
-                AxisAlignedBoundingBox::new(32.0, 32.0)
+                AxisAlignedBoundingBox::new(32.0, 32.0),
+                PhysicsPosition::new(Vec2::new(512.0, y as f32 * 32.0))
             );
         }
     }
