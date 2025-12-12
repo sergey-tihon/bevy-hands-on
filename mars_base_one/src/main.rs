@@ -1,3 +1,4 @@
+use bevy::render::camera::ScalingMode;
 use bevy::{ecs::spawn, prelude::*};
 use my_library::*;
 
@@ -15,6 +16,9 @@ struct GameElement;
 
 #[derive(Component)]
 struct Player;
+
+#[derive(Component)]
+struct MyCamera;
 
 fn main() -> anyhow::Result<()> {
     let mut app = App::new();
@@ -51,7 +55,17 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<LoadedAssets>) {
-    commands.spawn(Camera2d::default()).insert(GameElement);
+    let cb = Camera2d;
+    let projection = Projection::Orthographic(OrthographicProjection {
+        scaling_mode: ScalingMode::WindowSize,
+        scale: 0.5,
+        ..OrthographicProjection::default_2d()
+    });
+    commands
+        .spawn(cb)
+        .insert(projection)
+        .insert(GameElement)
+        .insert(MyCamera);
 
     spawn_image!(
         assets,
