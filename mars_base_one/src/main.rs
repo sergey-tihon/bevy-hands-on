@@ -20,6 +20,73 @@ struct Player;
 #[derive(Component)]
 struct MyCamera;
 
+#[derive(Component)]
+struct Ground;
+
+struct World {
+    solid: Vec<bool>,
+    width: usize,
+    height: usize,
+}
+
+impl World {
+    fn mapidx(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
+    }
+
+    fn new(width: usize, height: usize, rng: &mut RandomNumberGenerator) -> Self {
+        let mut result = Self {
+            width,
+            height,
+            solid: vec![true; width * height],
+        };
+
+        result.clear_tiles(width / 2, height / 2);
+
+        result
+    }
+
+    fn spawn(&self, assets: &AssetStore, commands: &mut Commands, loaded_assets: &LoadedAssets) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.solid[y * self.width + x] {
+                    let position = Vec2::new(
+                        (x as f32 * 24.0) - ((self.width as f32 / 2.0) * 24.0),
+                        (y as f32 * 24.0) - ((self.height as f32 / 2.0) * 24.0),
+                    );
+                    //spawn a solid block
+                    spawn_image!(
+                        assets,
+                        commands,
+                        "ground",
+                        position.x,
+                        position.y,
+                        -1.0,
+                        loaded_assets,
+                        GameElement,
+                        Ground,
+                        PhysicsPosition::new(Vec2::new(position.x, position.y)),
+                        AxisAlignedBoundingBox::new(24.0, 24.0)
+                    );
+                }
+            }
+        }
+    }
+
+    fn clear_tiles(&mut self, x: usize, y: usize) {
+        for offset_x in -1..=1 {
+            for offset_y in -1..=1 {
+                let x = x as isize + offset_x;
+                let y = y as isize + offset_y;
+                if x > 0 && x < self.width as isize - 1 && y > 0 && y < self.height as isize {
+                    let idx = self.mapidx(x as usize, y as usize);
+                    self.solid[idx] = false;
+                }
+            }
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let mut app = App::new();
     add_phase!(app, GamePhase, GamePhase::Playing,
@@ -48,14 +115,23 @@ fn main() -> anyhow::Result<()> {
         GamePhase::Playing,
         GamePhase::GameOver,
     ))
-    .add_plugins(AssetManager::new().add_image("ship", "ship.png")?)
+    .add_plugins(
+        AssetManager::new()
+            .add_image("ship", "ship.png")?
+            .add_image("ground", "ground.png")?,
+    )
     .insert_resource(Animations::new())
     .run();
 
     Ok(())
 }
 
-fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<LoadedAssets>) {
+fn setup(
+    mut commands: Commands,
+    assets: Res<AssetStore>,
+    loaded_assets: Res<LoadedAssets>,
+    mut rng: ResMut<RandomNumberGenerator>,
+) {
     let cb = Camera2d;
     let projection = Projection::Orthographic(OrthographicProjection {
         scaling_mode: ScalingMode::WindowSize,
@@ -79,9 +155,12 @@ fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<Loa
         GameElement,
         Player,
         Velocity::default(),
-        PhysicsPosition::new(Vec2::new(0.0, 0.0)),
-        ApplyGravity
+        PhysicsPosition::new(Vec2::new(0.0, 0.0)) //ApplyGravity
     );
+
+    let world = World::new(200, 200, &mut rng);
+    world.spawn(&assets, &mut commands, &loaded_assets);
+    commands.insert_resource(StaticQuadTree::new(Vec2::new(10240.0, 7680.0), 6));
 }
 
 fn end_game(
