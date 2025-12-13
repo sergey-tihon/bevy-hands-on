@@ -1,3 +1,6 @@
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+
 use bevy::render::camera::ScalingMode;
 use bevy::{ecs::spawn, prelude::*};
 use my_library::*;
@@ -7,6 +10,7 @@ enum GamePhase {
     #[default]
     Loading,
     MainMenu,
+    WorldBuilding,
     Playing,
     GameOver,
 }
@@ -173,6 +177,11 @@ impl World {
 
 fn main() -> anyhow::Result<()> {
     let mut app = App::new();
+    add_phase!(app, GamePhase, GamePhase::WorldBuilding,
+        start => [spawn_builder],
+        run => [show_builder],
+        exit => []
+    );
     add_phase!(app, GamePhase, GamePhase::Playing,
         start => [setup],
         run => [ movement, end_game, physics_clock,
@@ -183,10 +192,8 @@ fn main() -> anyhow::Result<()> {
         exit => [cleanup::<GameElement>]
     );
 
-    app.add_event::<Impulse>()
-        .add_event::<PhysicsTick>()
-        .add_event::<OnCollision<Player, Ground>>();
-
+    app.add_event::<Impulse>();
+    app.add_event::<PhysicsTick>();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Mars Base One".to_string(),
@@ -199,7 +206,7 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(RandomPlugin)
     .add_plugins(GameStatePlugin::new(
         GamePhase::MainMenu,
-        GamePhase::Playing,
+        GamePhase::WorldBuilding,
         GamePhase::GameOver,
     ))
     .add_plugins(
@@ -208,17 +215,38 @@ fn main() -> anyhow::Result<()> {
             .add_image("ground", "ground.png")?,
     )
     .insert_resource(Animations::new())
+    .add_event::<OnCollision<Player, Ground>>()
     .run();
 
     Ok(())
 }
 
-fn setup(
-    mut commands: Commands,
-    assets: Res<AssetStore>,
-    loaded_assets: Res<LoadedAssets>,
-    mut rng: ResMut<RandomNumberGenerator>,
-) {
+static WORLD_READY: AtomicBool = AtomicBool::new(false);
+static NEW_WORLD: Mutex<Option<World>> = Mutex::new(None);
+
+fn spawn_builder() {
+    use std::sync::atomic::Ordering;
+    WORLD_READY.store(false, Ordering::Relaxed);
+
+    std::thread::spawn(|| {
+        let mut rng = my_library::RandomNumberGenerator::new();
+        let world = World::new(200, 200, &mut rng);
+        let mut lock = NEW_WORLD.lock().unwrap();
+        *lock = Some(world);
+        WORLD_READY.store(true, Ordering::Relaxed);
+    });
+}
+
+fn show_builder(mut state: ResMut<NextState<GamePhase>>, mut egui_context: egui::EguiContexts) {
+    egui::egui::Window::new("Performance").show(egui_context.ctx_mut(), |ui| {
+        ui.label("Building World");
+    });
+    if WORLD_READY.load(std::sync::atomic::Ordering::Relaxed) {
+        state.set(GamePhase::Playing);
+    }
+}
+
+fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<LoadedAssets>) {
     let cb = Camera2d;
     let projection = Projection::Orthographic(OrthographicProjection {
         scaling_mode: ScalingMode::WindowSize,
@@ -236,23 +264,27 @@ fn setup(
         commands,
         "ship",
         0.0,
-        0.0,
+        200.0,
         1.0,
         &loaded_assets,
         GameElement,
         Player,
         Velocity::default(),
-        PhysicsPosition::new(Vec2::new(0.0, 0.0)),
+        PhysicsPosition::new(Vec2::new(0.0, 200.0)),
         AxisAlignedBoundingBox::new(24.0, 24.0)
     );
 
-    let world = World::new(200, 200, &mut rng);
+    let mut lock = NEW_WORLD.lock().unwrap();
+    let world = lock.take().unwrap();
     world.spawn(&assets, &mut commands, &loaded_assets);
-    commands.insert_resource(StaticQuadTree::new(Vec2::new(10240.0, 7680.0), 6));
+    commands.insert_resource(StaticQuadTree::new(
+        Vec2::new(400.0 * 24.0, 400.0 * 24.0),
+        6,
+    ));
 }
 
 fn end_game(
-    mut state: ResMut<NextState<GamePhase>>,
+    //mut state: ResMut<NextState<GamePhase>>,
     player_query: Query<&Transform, With<Player>>,
 ) {
     let Ok(transform) = player_query.single() else {
@@ -264,7 +296,7 @@ fn end_game(
         || transform.translation.x < -512.0
         || transform.translation.x > 512.0
     {
-        state.set(GamePhase::GameOver);
+        //state.set(GamePhase::GameOver);
     }
 }
 fn movement(
