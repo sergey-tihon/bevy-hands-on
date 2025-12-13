@@ -43,6 +43,58 @@ impl World {
 
         result.clear_tiles(width / 2, height / 2);
 
+        let mut holes = vec![(width / 2, height / 2)];
+        for _ in 0..10 {
+            let x = rng.range(5..width - 5);
+            let y = rng.range(5..height - 5);
+            holes.push((x, y));
+            result.clear_tiles(x, y);
+            result.clear_tiles(x + 2, y);
+            result.clear_tiles(x - 2, y);
+            result.clear_tiles(x, y + 2);
+            result.clear_tiles(x, y - 2);
+        }
+
+        for i in 0..holes.len() {
+            let start = holes[i];
+            let end = holes[(i + 1) % holes.len()];
+            result.clear_line(start, end);
+        }
+
+        for y in height / 2..height {
+            result.clear_tiles(width / 2, y);
+        }
+
+        let mut done = false;
+        while !done {
+            let start_tile = holes[rng.range(0..10)];
+            let target = result.find_random_closed_tile(rng);
+            let (mut x, mut y) = (start_tile.0 as f32, start_tile.1 as f32);
+            let (slope_x, slope_y) = (
+                (target.0 as f32 - x) / (result.width as f32),
+                (target.1 as f32 - y) / (result.height as f32),
+            );
+
+            loop {
+                if x < 2.0 || x > width as f32 || y < 1.0 || y > height as f32 {
+                    break;
+                }
+                let tile_id = result.mapidx(x as usize, y as usize);
+                if result.solid[tile_id] {
+                    result.clear_tiles(x as usize, y as usize);
+                    break;
+                }
+                x += slope_x;
+                y += slope_y;
+            }
+
+            let solid_count = result.solid.iter().filter(|s| **s).count();
+            let solid_percent = solid_count as f32 / (width * height) as f32;
+            if solid_percent < 0.6 {
+                done = true;
+            }
+        }
+
         result
     }
 
@@ -52,7 +104,7 @@ impl World {
                 if self.solid[y * self.width + x] {
                     let position = Vec2::new(
                         (x as f32 * 24.0) - ((self.width as f32 / 2.0) * 24.0),
-                        (y as f32 * 24.0) - ((self.height as f32 / 2.0) * 24.0),
+                        (y as f32 * 24.0) - ((self.height as f32) * 24.0),
                     );
                     //spawn a solid block
                     spawn_image!(
@@ -85,6 +137,38 @@ impl World {
             }
         }
     }
+
+    fn clear_line(&mut self, start: (usize, usize), end: (usize, usize)) {
+        let (mut x, mut y) = (start.0 as f32, start.1 as f32);
+        let (slope_x, slipe_y) = (
+            (end.0 as f32 - x) / (self.width as f32),
+            (end.1 as f32 - y) / (self.height as f32),
+        );
+
+        loop {
+            let (tx, ty) = (x as usize, y as usize);
+            if tx < 1 || tx > self.width - 1 || ty < 1 || ty > self.height - 1 {
+                break;
+            }
+            if tx == end.0 && ty == end.1 {
+                break;
+            }
+            self.clear_tiles(x as usize, y as usize);
+            x += slope_x;
+            y += slipe_y;
+        }
+    }
+
+    fn find_random_closed_tile(&self, rng: &mut RandomNumberGenerator) -> (usize, usize) {
+        loop {
+            let x = rng.range(0..self.width);
+            let y = rng.range(0..self.height);
+            let idx = self.mapidx(x, y);
+            if self.solid[idx] {
+                return (x, y);
+            }
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -94,12 +178,15 @@ fn main() -> anyhow::Result<()> {
         run => [ movement, end_game, physics_clock,
             sum_impulses, apply_gravity, apply_velocity,
             terminal_velocity.after(apply_velocity),
+            check_collisions::<Player, Ground>, bounce,
             camera_follow.after(terminal_velocity) ],
         exit => [cleanup::<GameElement>]
     );
 
-    app.add_event::<Impulse>();
-    app.add_event::<PhysicsTick>();
+    app.add_event::<Impulse>()
+        .add_event::<PhysicsTick>()
+        .add_event::<OnCollision<Player, Ground>>();
+
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Mars Base One".to_string(),
@@ -155,7 +242,8 @@ fn setup(
         GameElement,
         Player,
         Velocity::default(),
-        PhysicsPosition::new(Vec2::new(0.0, 0.0)) //ApplyGravity
+        PhysicsPosition::new(Vec2::new(0.0, 0.0)),
+        AxisAlignedBoundingBox::new(24.0, 24.0)
     );
 
     let world = World::new(200, 200, &mut rng);
@@ -229,4 +317,34 @@ fn camera_follow(
     };
 
     camera.translation = Vec3::new(player.translation.x, player.translation.y, 10.0);
+}
+
+fn bounce(
+    mut collisions: EventReader<OnCollision<Player, Ground>>,
+    mut player_query: Query<&PhysicsPosition, With<Player>>,
+    groud_query: Query<&PhysicsPosition, With<Ground>>,
+    mut impulses: EventWriter<Impulse>,
+) {
+    let mut bounce = Vec2::default();
+    let mut entity = None;
+    let mut bounces = 0;
+    for collision in collisions.read() {
+        if let Ok(player) = player_query.single_mut()
+            && let Ok(groud) = groud_query.get(collision.entity_b)
+        {
+            entity = Some(collision.entity_a);
+            let difference = player.start_frame - groud.start_frame;
+            bounces += 1;
+            bounce += difference;
+        }
+    }
+    if bounce != Vec2::default() {
+        bounce = bounce.normalize();
+        impulses.write(Impulse {
+            target: entity.unwrap(),
+            amount: Vec3::new(bounce.x / bounces as f32, bounce.y / bounces as f32, 0.0),
+            absolute: true,
+            source: 2,
+        });
+    }
 }
