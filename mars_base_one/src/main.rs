@@ -1,9 +1,10 @@
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
+use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
-use bevy::{ecs::spawn, prelude::*};
 use my_library::egui::egui::Color32;
 use my_library::*;
 
@@ -33,6 +34,8 @@ struct World {
     solid: Vec<bool>,
     width: usize,
     height: usize,
+    mesh: Option<Mesh>,
+    tile_positons: Vec<(f32, f32)>,
 }
 
 impl World {
@@ -45,6 +48,8 @@ impl World {
             width,
             height,
             solid: vec![true; width * height],
+            mesh: None,
+            tile_positons: vec![],
         };
 
         result.clear_tiles(width / 2, height / 2);
@@ -101,33 +106,84 @@ impl World {
             }
         }
 
+        let (mesh, tile_positions) = result.build_mesh();
+        result.mesh = Some(mesh);
+        result.tile_positons = tile_positions;
+
         result
     }
 
-    fn spawn(&self, assets: &AssetStore, commands: &mut Commands, loaded_assets: &LoadedAssets) {
+    fn build_mesh(&self) -> (Mesh, Vec<(f32, f32)>) {
+        let mut position = vec![];
+        let mut uv = vec![];
+        let mut tile_positions = vec![];
+        let x_offset = (self.width as f32 / 2.0) * 24.0;
+        let y_offset = (self.height as f32) * 24.0;
         for y in 0..self.height {
             for x in 0..self.width {
-                if self.solid[y * self.width + x] {
-                    let position = Vec2::new(
-                        (x as f32 * 24.0) - ((self.width as f32 / 2.0) * 24.0),
-                        (y as f32 * 24.0) - ((self.height as f32) * 24.0),
-                    );
-                    //spawn a solid block
-                    spawn_image!(
-                        assets,
-                        commands,
-                        "ground",
-                        position.x,
-                        position.y,
-                        -1.0,
-                        loaded_assets,
-                        GameElement,
-                        Ground,
-                        PhysicsPosition::new(Vec2::new(position.x, position.y)),
-                        AxisAlignedBoundingBox::new(24.0, 24.0)
-                    );
+                if self.solid[self.mapidx(x, y)] {
+                    let left = x as f32 * 24.0 - x_offset;
+                    let right = left + 24.0;
+                    let top = y as f32 * 24.0 - y_offset;
+                    let bottom = top + 24.0;
+
+                    position.push([left, bottom, 1.0]);
+                    position.push([right, bottom, 1.0]);
+                    position.push([right, top, 1.0]);
+                    position.push([left, top, 1.0]);
+                    position.push([left, bottom, 1.0]);
+                    position.push([right, top, 1.0]);
+
+                    uv.push([0.0, 1.0]);
+                    uv.push([1.0, 1.0]);
+                    uv.push([1.0, 0.0]);
+                    uv.push([0.0, 0.0]);
+                    uv.push([0.0, 1.0]);
+                    uv.push([1.0, 0.0]);
+
+                    tile_positions.push((left + 12.0, top + 12.0));
                 }
             }
+        }
+
+        (
+            Mesh::new(
+                bevy::render::mesh::PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, position)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv),
+            tile_positions,
+        )
+    }
+
+    fn spawn(
+        &self,
+        assets: &AssetStore,
+        commands: &mut Commands,
+        loaded_assets: &LoadedAssets,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<ColorMaterial>,
+    ) {
+        let mesh = self.mesh.as_ref().unwrap().clone();
+        let mesh_handle = meshes.add(mesh);
+        let material_handle = materials.add(ColorMaterial {
+            texture: Some(assets.get_handle("ground", loaded_assets).unwrap()),
+            ..default()
+        });
+
+        commands
+            .spawn(Mesh2d(mesh_handle))
+            .insert(MeshMaterial2d(material_handle))
+            .insert(Transform::from_xyz(0.0, 0.0, 0.0));
+
+        for (x, y) in self.tile_positons.iter() {
+            commands
+                .spawn_empty()
+                .insert(GameElement)
+                .insert(Ground)
+                .insert(PhysicsPosition::new(Vec2::new(*x, *y)))
+                .insert(AxisAlignedBoundingBox::new(24.0, 24.0));
         }
     }
 
@@ -250,7 +306,14 @@ fn show_builder(mut state: ResMut<NextState<GamePhase>>, mut egui_context: egui:
     }
 }
 
-fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<LoadedAssets>) {
+fn setup(
+    mut commands: Commands,
+    assets: Res<AssetStore>,
+    loaded_assets: Res<LoadedAssets>,
+
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     let cb = Camera2d;
     let projection = Projection::Orthographic(OrthographicProjection {
         scaling_mode: ScalingMode::WindowSize,
@@ -275,12 +338,19 @@ fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<Loa
         Player,
         Velocity::default(),
         PhysicsPosition::new(Vec2::new(0.0, 200.0)),
+        //ApplyGravity,
         AxisAlignedBoundingBox::new(24.0, 24.0)
     );
 
     let mut lock = NEW_WORLD.lock().unwrap();
     let world = lock.take().unwrap();
-    world.spawn(&assets, &mut commands, &loaded_assets);
+    world.spawn(
+        &assets,
+        &mut commands,
+        &loaded_assets,
+        &mut meshes,
+        &mut materials,
+    );
     commands.insert_resource(StaticQuadTree::new(
         Vec2::new(400.0 * 24.0, 400.0 * 24.0),
         6,
