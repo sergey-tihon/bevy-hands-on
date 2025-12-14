@@ -1,8 +1,10 @@
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::render::camera::ScalingMode;
 use bevy::{ecs::spawn, prelude::*};
+use my_library::egui::egui::Color32;
 use my_library::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Default, States)]
@@ -188,7 +190,8 @@ fn main() -> anyhow::Result<()> {
             sum_impulses, apply_gravity, apply_velocity,
             terminal_velocity.after(apply_velocity),
             check_collisions::<Player, Ground>, bounce,
-            camera_follow.after(terminal_velocity) ],
+            camera_follow.after(terminal_velocity),
+            show_performance ],
         exit => [cleanup::<GameElement>]
     );
 
@@ -214,6 +217,7 @@ fn main() -> anyhow::Result<()> {
             .add_image("ship", "ship.png")?
             .add_image("ground", "ground.png")?,
     )
+    .add_plugins(FrameTimeDiagnosticsPlugin { ..default() })
     .insert_resource(Animations::new())
     .add_event::<OnCollision<Player, Ground>>()
     .run();
@@ -379,4 +383,21 @@ fn bounce(
             source: 2,
         });
     }
+}
+
+fn show_performance(diagnostics: Res<DiagnosticsStore>, mut egui_context: egui::EguiContexts) {
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|fps_diag| fps_diag.average())
+        .unwrap_or(0.0);
+
+    egui::egui::Window::new("Performance").show(egui_context.ctx_mut(), |ui| {
+        let fps_text = format!("FPS: {:.1}", fps);
+        let color = match fps as u32 {
+            0..=29 => Color32::RED,
+            30..=59 => Color32::GOLD,
+            _ => Color32::GREEN,
+        };
+        ui.colored_label(color, fps_text);
+    });
 }
