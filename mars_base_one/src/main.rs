@@ -1,8 +1,13 @@
+use std::fs::read;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
+use bevy::asset::RenderAssetUsages;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::image::TranscodeFormat;
+use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
-use bevy::{ecs::spawn, prelude::*};
+use my_library::egui::egui::Color32;
 use my_library::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Default, States)]
@@ -31,6 +36,8 @@ struct World {
     solid: Vec<bool>,
     width: usize,
     height: usize,
+    mesh: Option<Mesh>,
+    tile_positons: Vec<(f32, f32)>,
 }
 
 impl World {
@@ -43,6 +50,8 @@ impl World {
             width,
             height,
             solid: vec![true; width * height],
+            mesh: None,
+            tile_positons: vec![],
         };
 
         result.clear_tiles(width / 2, height / 2);
@@ -99,33 +108,101 @@ impl World {
             }
         }
 
+        let (mesh, tile_positions) = result.build_mesh();
+        result.mesh = Some(mesh);
+        result.tile_positons = tile_positions;
+
         result
     }
 
-    fn spawn(&self, assets: &AssetStore, commands: &mut Commands, loaded_assets: &LoadedAssets) {
+    fn build_mesh(&self) -> (Mesh, Vec<(f32, f32)>) {
+        let mut position = vec![];
+        let mut uv = vec![];
+        let mut tile_positions = vec![];
+        let x_offset = (self.width as f32 / 2.0) * 24.0;
+        let y_offset = (self.height as f32) * 24.0;
         for y in 0..self.height {
             for x in 0..self.width {
-                if self.solid[y * self.width + x] {
-                    let position = Vec2::new(
-                        (x as f32 * 24.0) - ((self.width as f32 / 2.0) * 24.0),
-                        (y as f32 * 24.0) - ((self.height as f32) * 24.0),
-                    );
-                    //spawn a solid block
-                    spawn_image!(
-                        assets,
-                        commands,
-                        "ground",
-                        position.x,
-                        position.y,
-                        -1.0,
-                        loaded_assets,
-                        GameElement,
-                        Ground,
-                        PhysicsPosition::new(Vec2::new(position.x, position.y)),
-                        AxisAlignedBoundingBox::new(24.0, 24.0)
-                    );
+                if self.solid[self.mapidx(x, y)] {
+                    let left = x as f32 * 24.0 - x_offset;
+                    let right = left + 24.0;
+                    let top = y as f32 * 24.0 - y_offset;
+                    let bottom = top + 24.0;
+
+                    position.push([left, bottom, 1.0]);
+                    position.push([right, bottom, 1.0]);
+                    position.push([right, top, 1.0]);
+                    position.push([left, top, 1.0]);
+                    position.push([left, bottom, 1.0]);
+                    position.push([right, top, 1.0]);
+
+                    uv.push([0.0, 1.0]);
+                    uv.push([1.0, 1.0]);
+                    uv.push([1.0, 0.0]);
+                    uv.push([0.0, 0.0]);
+                    uv.push([0.0, 1.0]);
+                    uv.push([1.0, 0.0]);
+
+                    //tile_positions.push((left + 12.0, top + 12.0));
+                    let mut needs_physics = false;
+
+                    if x == 0 || x > self.width - 3 || y == 0 || y > self.height - 3 {
+                        needs_physics = true;
+                    } else {
+                        let solid_count = self.solid[self.mapidx(x - 1, y)] as u8
+                            + self.solid[self.mapidx(x + 1, y)] as u8
+                            + self.solid[self.mapidx(x, y - 1)] as u8
+                            + self.solid[self.mapidx(x, y + 1)] as u8;
+                        if solid_count < 4 {
+                            needs_physics = true;
+                        }
+                    }
+
+                    if needs_physics {
+                        tile_positions.push((left + 12.0, top + 12.0));
+                    }
                 }
             }
+        }
+
+        (
+            Mesh::new(
+                bevy::render::mesh::PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, position)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv),
+            tile_positions,
+        )
+    }
+
+    fn spawn(
+        &self,
+        assets: &AssetStore,
+        commands: &mut Commands,
+        loaded_assets: &LoadedAssets,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<ColorMaterial>,
+    ) {
+        let mesh = self.mesh.as_ref().unwrap().clone();
+        let mesh_handle = meshes.add(mesh);
+        let material_handle = materials.add(ColorMaterial {
+            texture: Some(assets.get_handle("ground", loaded_assets).unwrap()),
+            ..default()
+        });
+
+        commands
+            .spawn(Mesh2d(mesh_handle))
+            .insert(MeshMaterial2d(material_handle))
+            .insert(Transform::from_xyz(0.0, 0.0, 0.0));
+
+        for (x, y) in self.tile_positons.iter() {
+            commands
+                .spawn_empty()
+                .insert(GameElement)
+                .insert(Ground)
+                .insert(PhysicsPosition::new(Vec2::new(*x, *y)))
+                .insert(AxisAlignedBoundingBox::new(24.0, 24.0));
         }
     }
 
@@ -188,7 +265,10 @@ fn main() -> anyhow::Result<()> {
             sum_impulses, apply_gravity, apply_velocity,
             terminal_velocity.after(apply_velocity),
             check_collisions::<Player, Ground>, bounce,
-            camera_follow.after(terminal_velocity) ],
+            camera_follow.after(terminal_velocity),
+            show_performance,
+            spawn_particle_system, particle_age_system
+        ],
         exit => [cleanup::<GameElement>]
     );
 
@@ -212,10 +292,15 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(
         AssetManager::new()
             .add_image("ship", "ship.png")?
-            .add_image("ground", "ground.png")?,
+            .add_image("ground", "ground.png")?
+            .add_image("backdrop", "backing.png")?
+            .add_image("mothership", "mothership.png")?
+            .add_image("particle", "particle.png")?,
     )
+    .add_plugins(FrameTimeDiagnosticsPlugin { ..default() })
     .insert_resource(Animations::new())
     .add_event::<OnCollision<Player, Ground>>()
+    .add_event::<SpawnParticle>()
     .run();
 
     Ok(())
@@ -246,7 +331,14 @@ fn show_builder(mut state: ResMut<NextState<GamePhase>>, mut egui_context: egui:
     }
 }
 
-fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<LoadedAssets>) {
+fn setup(
+    mut commands: Commands,
+    assets: Res<AssetStore>,
+    loaded_assets: Res<LoadedAssets>,
+
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     let cb = Camera2d;
     let projection = Projection::Orthographic(OrthographicProjection {
         scaling_mode: ScalingMode::WindowSize,
@@ -271,12 +363,45 @@ fn setup(mut commands: Commands, assets: Res<AssetStore>, loaded_assets: Res<Loa
         Player,
         Velocity::default(),
         PhysicsPosition::new(Vec2::new(0.0, 200.0)),
+        //ApplyGravity,
         AxisAlignedBoundingBox::new(24.0, 24.0)
     );
 
+    spawn_image!(
+        assets,
+        commands,
+        "mothership",
+        0.0,
+        400.0,
+        10.0,
+        &loaded_assets,
+        GameElement
+    );
+
+    let x = 100.0;
+    let y = 100.0;
+    let x_scale = (200.0 * 24.0) / 1720.0;
+    let y_scale = (300.0 * 24.0) / 1024.0;
+    let center_x = (x as f32 * 24.0) - ((200.0 / 2.0) * 24.0);
+    let center_y = ((y as f32 + 1.0) * 24.0) - (200.0 * 24.0);
+    let mut tranform = Transform::from_xyz(center_x, center_y, -10.0);
+    tranform.scale = Vec3::new(x_scale, y_scale, 1.0);
+    commands
+        .spawn(Sprite::from_image(
+            assets.get_handle("backdrop", &loaded_assets).unwrap(),
+        ))
+        .insert(tranform)
+        .insert(GameElement);
+
     let mut lock = NEW_WORLD.lock().unwrap();
     let world = lock.take().unwrap();
-    world.spawn(&assets, &mut commands, &loaded_assets);
+    world.spawn(
+        &assets,
+        &mut commands,
+        &loaded_assets,
+        &mut meshes,
+        &mut materials,
+    );
     commands.insert_resource(StaticQuadTree::new(
         Vec2::new(400.0 * 24.0, 400.0 * 24.0),
         6,
@@ -303,6 +428,7 @@ fn movement(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut player_query: Query<(Entity, &mut Transform), With<Player>>,
     mut impulses: EventWriter<Impulse>,
+    mut particles: EventWriter<SpawnParticle>,
 ) {
     let Ok((entity, mut transform)) = player_query.single_mut() else {
         return;
@@ -310,9 +436,23 @@ fn movement(
 
     if keyboard.pressed(KeyCode::ArrowLeft) {
         transform.rotate(Quat::from_rotation_z(f32::to_radians(2.0)));
+
+        particles.write(SpawnParticle {
+            position: -transform.local_x().truncate()
+                + Vec2::new(transform.translation.x, transform.translation.y),
+            color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
+            velocity: transform.local_x().as_vec3(),
+        });
     }
     if keyboard.pressed(KeyCode::ArrowRight) {
         transform.rotate(Quat::from_rotation_z(f32::to_radians(-2.0)));
+
+        particles.write(SpawnParticle {
+            position: transform.local_x().truncate()
+                + Vec2::new(transform.translation.x, transform.translation.y),
+            color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
+            velocity: -transform.local_x().as_vec3(),
+        });
     }
     if keyboard.pressed(KeyCode::ArrowUp) {
         impulses.write(Impulse {
@@ -320,6 +460,13 @@ fn movement(
             amount: transform.local_y().as_vec3(),
             absolute: false,
             source: 1,
+        });
+
+        particles.write(SpawnParticle {
+            position: transform.local_y().truncate()
+                + Vec2::new(transform.translation.x, transform.translation.y),
+            color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
+            velocity: -transform.local_y().as_vec3(),
         });
     }
 }
@@ -378,5 +525,72 @@ fn bounce(
             absolute: true,
             source: 2,
         });
+    }
+}
+
+fn show_performance(diagnostics: Res<DiagnosticsStore>, mut egui_context: egui::EguiContexts) {
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|fps_diag| fps_diag.average())
+        .unwrap_or(0.0);
+
+    egui::egui::Window::new("Performance").show(egui_context.ctx_mut(), |ui| {
+        let fps_text = format!("FPS: {:.1}", fps);
+        let color = match fps as u32 {
+            0..=29 => Color32::RED,
+            30..=59 => Color32::GOLD,
+            _ => Color32::GREEN,
+        };
+        ui.colored_label(color, fps_text);
+    });
+}
+
+#[derive(Event)]
+pub struct SpawnParticle {
+    position: Vec2,
+    color: LinearRgba,
+    velocity: Vec3,
+}
+
+#[derive(Component)]
+pub struct Particle {
+    pub lifetime: f32,
+}
+
+fn spawn_particle_system(
+    mut commands: Commands,
+    mut reader: EventReader<SpawnParticle>,
+    assets: Res<AssetStore>,
+    loaded_assets: Res<LoadedAssets>,
+) {
+    for particle in reader.read() {
+        let mut sprite = Sprite::from_image(assets.get_handle("particle", &loaded_assets).unwrap());
+        sprite.color = particle.color.into();
+        commands
+            .spawn(sprite)
+            .insert(Transform::from_xyz(
+                particle.position.x,
+                particle.position.y,
+                5.0,
+            ))
+            .insert(GameElement)
+            .insert(Particle { lifetime: 2.0 })
+            .insert(Velocity(particle.velocity))
+            .insert(PhysicsPosition::new(particle.position));
+    }
+}
+
+fn particle_age_system(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Particle, &mut Sprite)>,
+) {
+    for (entity, mut particle, mut sprite) in query.iter_mut() {
+        particle.lifetime -= time.delta_secs();
+        if particle.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+
+        sprite.color.set_alpha(particle.lifetime / 2.0);
     }
 }
