@@ -289,7 +289,8 @@ fn main() -> anyhow::Result<()> {
         AssetManager::new()
             .add_image("ship", "ship.png")?
             .add_image("ground", "ground.png")?
-            .add_image("backdrop", "backing.png")?,
+            .add_image("backdrop", "backing.png")?
+            .add_image("mothership", "mothership.png")?,
     )
     .add_plugins(FrameTimeDiagnosticsPlugin { ..default() })
     .insert_resource(Animations::new())
@@ -358,6 +359,17 @@ fn setup(
         PhysicsPosition::new(Vec2::new(0.0, 200.0)),
         //ApplyGravity,
         AxisAlignedBoundingBox::new(24.0, 24.0)
+    );
+
+    spawn_image!(
+        assets,
+        commands,
+        "mothership",
+        0.0,
+        400.0,
+        10.0,
+        &loaded_assets,
+        GameElement
     );
 
     let x = 100.0;
