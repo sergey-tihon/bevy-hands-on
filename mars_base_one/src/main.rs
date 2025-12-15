@@ -1,8 +1,10 @@
+use std::fs::read;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::image::TranscodeFormat;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use my_library::egui::egui::Color32;
@@ -264,7 +266,9 @@ fn main() -> anyhow::Result<()> {
             terminal_velocity.after(apply_velocity),
             check_collisions::<Player, Ground>, bounce,
             camera_follow.after(terminal_velocity),
-            show_performance ],
+            show_performance,
+            spawn_particle_system, particle_age_system
+        ],
         exit => [cleanup::<GameElement>]
     );
 
@@ -290,11 +294,13 @@ fn main() -> anyhow::Result<()> {
             .add_image("ship", "ship.png")?
             .add_image("ground", "ground.png")?
             .add_image("backdrop", "backing.png")?
-            .add_image("mothership", "mothership.png")?,
+            .add_image("mothership", "mothership.png")?
+            .add_image("particle", "particle.png")?,
     )
     .add_plugins(FrameTimeDiagnosticsPlugin { ..default() })
     .insert_resource(Animations::new())
     .add_event::<OnCollision<Player, Ground>>()
+    .add_event::<SpawnParticle>()
     .run();
 
     Ok(())
@@ -422,6 +428,7 @@ fn movement(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut player_query: Query<(Entity, &mut Transform), With<Player>>,
     mut impulses: EventWriter<Impulse>,
+    mut particles: EventWriter<SpawnParticle>,
 ) {
     let Ok((entity, mut transform)) = player_query.single_mut() else {
         return;
@@ -429,9 +436,23 @@ fn movement(
 
     if keyboard.pressed(KeyCode::ArrowLeft) {
         transform.rotate(Quat::from_rotation_z(f32::to_radians(2.0)));
+
+        particles.write(SpawnParticle {
+            position: -transform.local_x().truncate()
+                + Vec2::new(transform.translation.x, transform.translation.y),
+            color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
+            velocity: transform.local_x().as_vec3(),
+        });
     }
     if keyboard.pressed(KeyCode::ArrowRight) {
         transform.rotate(Quat::from_rotation_z(f32::to_radians(-2.0)));
+
+        particles.write(SpawnParticle {
+            position: transform.local_x().truncate()
+                + Vec2::new(transform.translation.x, transform.translation.y),
+            color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
+            velocity: -transform.local_x().as_vec3(),
+        });
     }
     if keyboard.pressed(KeyCode::ArrowUp) {
         impulses.write(Impulse {
@@ -439,6 +460,13 @@ fn movement(
             amount: transform.local_y().as_vec3(),
             absolute: false,
             source: 1,
+        });
+
+        particles.write(SpawnParticle {
+            position: transform.local_y().truncate()
+                + Vec2::new(transform.translation.x, transform.translation.y),
+            color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
+            velocity: -transform.local_y().as_vec3(),
         });
     }
 }
@@ -515,4 +543,54 @@ fn show_performance(diagnostics: Res<DiagnosticsStore>, mut egui_context: egui::
         };
         ui.colored_label(color, fps_text);
     });
+}
+
+#[derive(Event)]
+pub struct SpawnParticle {
+    position: Vec2,
+    color: LinearRgba,
+    velocity: Vec3,
+}
+
+#[derive(Component)]
+pub struct Particle {
+    pub lifetime: f32,
+}
+
+fn spawn_particle_system(
+    mut commands: Commands,
+    mut reader: EventReader<SpawnParticle>,
+    assets: Res<AssetStore>,
+    loaded_assets: Res<LoadedAssets>,
+) {
+    for particle in reader.read() {
+        let mut sprite = Sprite::from_image(assets.get_handle("particle", &loaded_assets).unwrap());
+        sprite.color = particle.color.into();
+        commands
+            .spawn(sprite)
+            .insert(Transform::from_xyz(
+                particle.position.x,
+                particle.position.y,
+                5.0,
+            ))
+            .insert(GameElement)
+            .insert(Particle { lifetime: 2.0 })
+            .insert(Velocity(particle.velocity))
+            .insert(PhysicsPosition::new(particle.position));
+    }
+}
+
+fn particle_age_system(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Particle, &mut Sprite)>,
+) {
+    for (entity, mut particle, mut sprite) in query.iter_mut() {
+        particle.lifetime -= time.delta_secs();
+        if particle.lifetime <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+
+        sprite.color.set_alpha(particle.lifetime / 2.0);
+    }
 }
