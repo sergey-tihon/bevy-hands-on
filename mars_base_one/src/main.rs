@@ -24,7 +24,11 @@ enum GamePhase {
 struct GameElement;
 
 #[derive(Component)]
-struct Player;
+struct Player {
+    miners_saved: u32,
+    shields: i32,
+    fuel: i32,
+}
 
 #[derive(Component)]
 struct MyCamera;
@@ -38,6 +42,7 @@ struct World {
     height: usize,
     mesh: Option<Mesh>,
     tile_positons: Vec<(f32, f32)>,
+    spawn_positions: Vec<(f32, f32)>,
 }
 
 impl World {
@@ -52,6 +57,7 @@ impl World {
             solid: vec![true; width * height],
             mesh: None,
             tile_positons: vec![],
+            spawn_positions: vec![],
         };
 
         result.clear_tiles(width / 2, height / 2);
@@ -108,27 +114,29 @@ impl World {
             }
         }
 
-        let (mesh, tile_positions) = result.build_mesh();
+        let (mesh, tile_positions, spawn_positions) = result.build_mesh();
         result.mesh = Some(mesh);
         result.tile_positons = tile_positions;
+        result.spawn_positions = spawn_positions;
 
         result
     }
 
-    fn build_mesh(&self) -> (Mesh, Vec<(f32, f32)>) {
+    fn build_mesh(&self) -> (Mesh, Vec<(f32, f32)>, Vec<(f32, f32)>) {
         let mut position = vec![];
         let mut uv = vec![];
         let mut tile_positions = vec![];
+        let mut possible_miner_positions = vec![];
         let x_offset = (self.width as f32 / 2.0) * 24.0;
         let y_offset = (self.height as f32) * 24.0;
         for y in 0..self.height {
             for x in 0..self.width {
-                if self.solid[self.mapidx(x, y)] {
-                    let left = x as f32 * 24.0 - x_offset;
-                    let right = left + 24.0;
-                    let top = y as f32 * 24.0 - y_offset;
-                    let bottom = top + 24.0;
+                let left = x as f32 * 24.0 - x_offset;
+                let right = left + 24.0;
+                let top = y as f32 * 24.0 - y_offset;
+                let bottom = top + 24.0;
 
+                if self.solid[self.mapidx(x, y)] {
                     position.push([left, bottom, 1.0]);
                     position.push([right, bottom, 1.0]);
                     position.push([right, top, 1.0]);
@@ -161,6 +169,15 @@ impl World {
                     if needs_physics {
                         tile_positions.push((left + 12.0, top + 12.0));
                     }
+                } else {
+                    if x > 1
+                        && x < self.width - 3
+                        && y > 1
+                        && y < self.height - 3
+                        && self.solid[self.mapidx(x, y - 1)]
+                    {
+                        possible_miner_positions.push((left + 12.0, top + 12.0));
+                    }
                 }
             }
         }
@@ -173,6 +190,7 @@ impl World {
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, position)
             .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv),
             tile_positions,
+            possible_miner_positions,
         )
     }
 
@@ -203,6 +221,58 @@ impl World {
                 .insert(Ground)
                 .insert(PhysicsPosition::new(Vec2::new(*x, *y)))
                 .insert(AxisAlignedBoundingBox::new(24.0, 24.0));
+        }
+
+        // Spawn miners
+        for (x, y) in self.spawn_positions.iter().take(20) {
+            spawn_image!(
+                assets,
+                commands,
+                "spaceman",
+                *x,
+                *y,
+                10.0,
+                loaded_assets,
+                GameElement,
+                Miner,
+                Velocity::default(),
+                PhysicsPosition::new(Vec2::new(*x, *y)),
+                AxisAlignedBoundingBox::new(48.0, 48.0)
+            );
+        }
+        // Spawn fuel
+        for (x, y) in self.spawn_positions.iter().skip(20).take(20) {
+            spawn_image!(
+                assets,
+                commands,
+                "fuel",
+                *x,
+                *y,
+                10.0,
+                loaded_assets,
+                GameElement,
+                Fuel,
+                Velocity::default(),
+                PhysicsPosition::new(Vec2::new(*x, *y)),
+                AxisAlignedBoundingBox::new(48.0, 48.0)
+            );
+        }
+        // Spawn batteries
+        for (x, y) in self.spawn_positions.iter().skip(40).take(20) {
+            spawn_image!(
+                assets,
+                commands,
+                "battery",
+                *x,
+                *y,
+                10.0,
+                loaded_assets,
+                GameElement,
+                Battery,
+                Velocity::default(),
+                PhysicsPosition::new(Vec2::new(*x, *y)),
+                AxisAlignedBoundingBox::new(48.0, 48.0)
+            );
         }
     }
 
@@ -267,7 +337,14 @@ fn main() -> anyhow::Result<()> {
             check_collisions::<Player, Ground>, bounce,
             camera_follow.after(terminal_velocity),
             show_performance,
-            spawn_particle_system, particle_age_system
+            spawn_particle_system, particle_age_system,
+            score_display, miner_beacon,
+            check_collisions::<Player, Miner>,
+            check_collisions::<Player, Fuel>,
+            check_collisions::<Player, Battery>,
+            collect_game_element_and_despawn::<Miner, {BurstColor::Green as u8}>,
+            collect_game_element_and_despawn::<Fuel, {BurstColor::Orange as u8}>,
+            collect_game_element_and_despawn::<Battery, {BurstColor::Magenta as u8}>
         ],
         exit => [cleanup::<GameElement>]
     );
@@ -295,11 +372,17 @@ fn main() -> anyhow::Result<()> {
             .add_image("ground", "ground.png")?
             .add_image("backdrop", "backing.png")?
             .add_image("mothership", "mothership.png")?
-            .add_image("particle", "particle.png")?,
+            .add_image("particle", "particle.png")?
+            .add_image("spaceman", "spaceman.png")?
+            .add_image("fuel", "fuel.png")?
+            .add_image("battery", "battery.png")?,
     )
     .add_plugins(FrameTimeDiagnosticsPlugin { ..default() })
     .insert_resource(Animations::new())
     .add_event::<OnCollision<Player, Ground>>()
+    .add_event::<OnCollision<Player, Miner>>()
+    .add_event::<OnCollision<Player, Fuel>>()
+    .add_event::<OnCollision<Player, Battery>>()
     .add_event::<SpawnParticle>()
     .run();
 
@@ -315,9 +398,14 @@ fn spawn_builder() {
 
     std::thread::spawn(|| {
         let mut rng = my_library::RandomNumberGenerator::new();
-        let world = World::new(200, 200, &mut rng);
+        let mut world = World::new(200, 200, &mut rng);
+
+        use my_library::rand::seq::SliceRandom;
+        world.spawn_positions.shuffle(&mut rng.rng);
+
         let mut lock = NEW_WORLD.lock().unwrap();
         *lock = Some(world);
+
         WORLD_READY.store(true, Ordering::Relaxed);
     });
 }
@@ -360,7 +448,11 @@ fn setup(
         1.0,
         &loaded_assets,
         GameElement,
-        Player,
+        Player {
+            miners_saved: 0,
+            shields: 500,
+            fuel: 100_000,
+        },
         Velocity::default(),
         PhysicsPosition::new(Vec2::new(0.0, 200.0)),
         //ApplyGravity,
@@ -408,29 +500,23 @@ fn setup(
     ));
 }
 
-fn end_game(
-    //mut state: ResMut<NextState<GamePhase>>,
-    player_query: Query<&Transform, With<Player>>,
-) {
-    let Ok(transform) = player_query.single() else {
+fn end_game(mut state: ResMut<NextState<GamePhase>>, player_query: Query<&Player>) {
+    let Ok(player) = player_query.single() else {
         return;
     };
 
-    if transform.translation.y < -384.0
-        || transform.translation.y > 384.0
-        || transform.translation.x < -512.0
-        || transform.translation.x > 512.0
-    {
-        //state.set(GamePhase::GameOver);
+    if player.miners_saved == 20 {
+        // Win condition met
+        state.set(GamePhase::GameOver);
     }
 }
 fn movement(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut player_query: Query<(Entity, &mut Transform), With<Player>>,
+    mut player_query: Query<(Entity, &mut Transform, &mut Player)>,
     mut impulses: EventWriter<Impulse>,
     mut particles: EventWriter<SpawnParticle>,
 ) {
-    let Ok((entity, mut transform)) = player_query.single_mut() else {
+    let Ok((entity, mut transform, mut player)) = player_query.single_mut() else {
         return;
     };
 
@@ -454,7 +540,7 @@ fn movement(
             velocity: -transform.local_x().as_vec3(),
         });
     }
-    if keyboard.pressed(KeyCode::ArrowUp) {
+    if keyboard.pressed(KeyCode::ArrowUp) && player.fuel > 0 {
         impulses.write(Impulse {
             target: entity,
             amount: transform.local_y().as_vec3(),
@@ -468,6 +554,7 @@ fn movement(
             color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
             velocity: -transform.local_y().as_vec3(),
         });
+        player.fuel -= 1;
     }
 }
 
@@ -500,15 +587,17 @@ fn camera_follow(
 
 fn bounce(
     mut collisions: EventReader<OnCollision<Player, Ground>>,
-    mut player_query: Query<&PhysicsPosition, With<Player>>,
+    mut player_query: Query<(&PhysicsPosition, &mut Player)>,
     groud_query: Query<&PhysicsPosition, With<Ground>>,
     mut impulses: EventWriter<Impulse>,
+    mut particles: EventWriter<SpawnParticle>,
+    mut state: ResMut<NextState<GamePhase>>,
 ) {
     let mut bounce = Vec2::default();
     let mut entity = None;
     let mut bounces = 0;
     for collision in collisions.read() {
-        if let Ok(player) = player_query.single_mut()
+        if let Ok((player, _)) = player_query.single_mut()
             && let Ok(groud) = groud_query.get(collision.entity_b)
         {
             entity = Some(collision.entity_a);
@@ -525,6 +614,23 @@ fn bounce(
             absolute: true,
             source: 2,
         });
+
+        // Spwen a burst of particles
+        let Ok((player_pos, mut player)) = player_query.single_mut() else {
+            return;
+        };
+
+        particle_burst(
+            player_pos.end_frame,
+            LinearRgba::new(0.0, 0.0, 1.0, 1.0),
+            &mut particles,
+            3.0,
+        );
+
+        player.shields -= 1;
+        if player.shields <= 0 {
+            state.set(GamePhase::GameOver);
+        }
     }
 }
 
@@ -592,5 +698,142 @@ fn particle_age_system(
         }
 
         sprite.color.set_alpha(particle.lifetime / 2.0);
+    }
+}
+
+#[derive(Component)]
+struct Miner;
+
+#[derive(Component)]
+struct Battery;
+
+#[derive(Component)]
+struct Fuel;
+
+fn score_display(player: Query<&Player>, mut egui_context: egui::EguiContexts) {
+    let Ok(player) = player.single() else {
+        return;
+    };
+
+    egui::egui::Window::new("Score").show(egui_context.ctx_mut(), |ui| {
+        ui.label(format!("Miners Saved: {}", player.miners_saved));
+        ui.label(format!("Shields: {}", player.shields));
+        ui.label(format!("Fuel: {}", player.fuel));
+    });
+}
+
+fn particle_burst(
+    center: Vec2,
+    color: LinearRgba,
+    spawn: &mut EventWriter<SpawnParticle>,
+    velocity: f32,
+) {
+    for angle in 0..360 {
+        let angle = (angle as f32).to_radians();
+        let velocity = Vec3::new(angle.cos() * velocity, angle.sin() * velocity, 0.0);
+        spawn.write(SpawnParticle {
+            position: center,
+            color,
+            velocity,
+        });
+    }
+}
+
+fn miner_beacon(
+    mut rng: ResMut<RandomNumberGenerator>,
+    miners: Query<&Transform, With<Miner>>,
+    mut spawn: EventWriter<SpawnParticle>,
+) {
+    for miner in miners.iter() {
+        if rng.range(1..=100) == 100 {
+            particle_burst(
+                miner.translation.truncate(),
+                LinearRgba::new(1.0, 1.0, 0.0, 1.0),
+                &mut spawn,
+                10.0,
+            );
+        }
+    }
+}
+
+trait OnCollect {
+    fn effect(player: &mut Player);
+}
+
+impl OnCollect for Miner {
+    fn effect(player: &mut Player) {
+        player.miners_saved += 1;
+    }
+}
+
+impl OnCollect for Fuel {
+    fn effect(player: &mut Player) {
+        player.fuel += 1_000;
+    }
+}
+
+impl OnCollect for Battery {
+    fn effect(player: &mut Player) {
+        player.shields += 100;
+    }
+}
+
+#[repr(u8)]
+enum BurstColor {
+    Green,
+    Orange,
+    Magenta,
+}
+
+impl From<u8> for BurstColor {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => BurstColor::Green,
+            1 => BurstColor::Orange,
+            2 => BurstColor::Magenta,
+            _ => panic!("Invalid BurstColor value"),
+        }
+    }
+}
+
+impl Into<LinearRgba> for BurstColor {
+    fn into(self) -> LinearRgba {
+        match self {
+            BurstColor::Green => LinearRgba::new(0.0, 1.0, 0.0, 1.0),
+            BurstColor::Orange => LinearRgba::new(1.0, 0.5, 0.0, 1.0),
+            BurstColor::Magenta => LinearRgba::new(1.0, 0.0, 1.0, 1.0),
+        }
+    }
+}
+
+fn collect_game_element_and_despawn<T: Component + OnCollect, const COLOR: u8>(
+    mut collisions: EventReader<OnCollision<Player, T>>,
+    mut commands: Commands,
+    mut player: Query<(&mut Player, &Transform)>,
+    mut spawn: EventWriter<SpawnParticle>,
+) {
+    let mut collected = Vec::new();
+    for collision in collisions.read() {
+        collected.push(collision.entity_b);
+    }
+
+    let Ok((mut player, player_pos)) = player.single_mut() else {
+        return;
+    };
+
+    for miner in collected.iter() {
+        if commands.get_entity(*miner).is_ok() {
+            commands.entity(*miner).despawn();
+        }
+        T::effect(&mut player);
+    }
+
+    if !collected.is_empty() {
+        particle_burst(
+            player_pos.translation.truncate(),
+            BurstColor::from(COLOR).into(),
+            &mut spawn,
+            2.0,
+        );
     }
 }

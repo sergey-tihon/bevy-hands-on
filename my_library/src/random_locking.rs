@@ -14,7 +14,7 @@ type RngCore = rand_xorshift::XorShiftRng;
 
 #[derive(bevy::prelude::Resource)]
 pub struct RandomNumberGenerator {
-    rng: Mutex<RngCore>,
+    pub rng: Mutex<RngCore>,
 }
 
 impl RandomNumberGenerator {
