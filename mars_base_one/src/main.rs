@@ -518,11 +518,11 @@ fn end_game(
 }
 fn movement(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut player_query: Query<(Entity, &mut Transform), With<Player>>,
+    mut player_query: Query<(Entity, &mut Transform, &mut Player)>,
     mut impulses: EventWriter<Impulse>,
     mut particles: EventWriter<SpawnParticle>,
 ) {
-    let Ok((entity, mut transform)) = player_query.single_mut() else {
+    let Ok((entity, mut transform, mut player)) = player_query.single_mut() else {
         return;
     };
 
@@ -546,7 +546,7 @@ fn movement(
             velocity: -transform.local_x().as_vec3(),
         });
     }
-    if keyboard.pressed(KeyCode::ArrowUp) {
+    if keyboard.pressed(KeyCode::ArrowUp) && player.fuel > 0 {
         impulses.write(Impulse {
             target: entity,
             amount: transform.local_y().as_vec3(),
@@ -560,6 +560,7 @@ fn movement(
             color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
             velocity: -transform.local_y().as_vec3(),
         });
+        player.fuel -= 1;
     }
 }
 
