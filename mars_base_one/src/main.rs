@@ -338,7 +338,7 @@ fn main() -> anyhow::Result<()> {
             camera_follow.after(terminal_velocity),
             show_performance,
             spawn_particle_system, particle_age_system,
-            score_display
+            score_display, miner_beacon
         ],
         exit => [cleanup::<GameElement>]
     );
@@ -697,4 +697,38 @@ fn score_display(player: Query<&Player>, mut egui_context: egui::EguiContexts) {
         ui.label(format!("Shields: {}", player.shields));
         ui.label(format!("Fuel: {}", player.fuel));
     });
+}
+
+fn particle_burst(
+    center: Vec2,
+    color: LinearRgba,
+    spawn: &mut EventWriter<SpawnParticle>,
+    velocity: f32,
+) {
+    for angle in 0..360 {
+        let angle = (angle as f32).to_radians();
+        let velocity = Vec3::new(angle.cos() * velocity, angle.sin() * velocity, 0.0);
+        spawn.write(SpawnParticle {
+            position: center,
+            color,
+            velocity,
+        });
+    }
+}
+
+fn miner_beacon(
+    mut rng: ResMut<RandomNumberGenerator>,
+    miners: Query<&Transform, With<Miner>>,
+    mut spawn: EventWriter<SpawnParticle>,
+) {
+    for miner in miners.iter() {
+        if rng.range(1..=100) == 100 {
+            particle_burst(
+                miner.translation.truncate(),
+                LinearRgba::new(1.0, 1.0, 0.0, 1.0),
+                &mut spawn,
+                10.0,
+            );
+        }
+    }
 }
