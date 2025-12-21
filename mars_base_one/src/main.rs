@@ -347,11 +347,15 @@ fn main() -> anyhow::Result<()> {
             collect_game_element_and_despawn::<Fuel, {BurstColor::Orange as u8}>,
             collect_game_element_and_despawn::<Battery, {BurstColor::Magenta as u8}>
         ],
-        exit => [cleanup::<GameElement>]
+        exit => [submit_score, cleanup::<GameElement>.after(submit_score)]
     );
 
     app.add_event::<Impulse>();
     app.add_event::<PhysicsTick>();
+
+    app.add_event::<FinalScore>();
+    app.add_systems(Update, final_score.run_if(in_state(GamePhase::GameOver)));
+
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Mars Base One".to_string(),
@@ -846,5 +850,42 @@ fn collect_game_element_and_despawn<T: Component + OnCollect, const COLOR: u8>(
             &mut spawn,
             2.0,
         );
+    }
+}
+
+#[derive(Event)]
+struct FinalScore(u32);
+
+fn submit_score(player: Query<&Player>, mut final_score: EventWriter<FinalScore>) {
+    for player in player.iter() {
+        final_score.write(FinalScore(player.score));
+    }
+}
+
+#[derive(Default)]
+struct ScoreState {
+    score: Option<u32>,
+    player_name: String,
+    submitted: bool,
+}
+
+fn final_score(
+    mut final_score: EventReader<FinalScore>,
+    mut state: Local<ScoreState>, // WOW, this is cool
+    mut egui_context: egui::EguiContexts,
+) {
+    for score in final_score.read() {
+        state.score = Some(score.0);
+    }
+
+    if let Some(score) = state.score {
+        egui::egui::Window::new("Final Score").show(egui_context.ctx_mut(), |ui| {
+            ui.label(format!("Your Final Score: {}", score));
+            ui.label("Please enter your name:");
+            ui.text_edit_singleline(&mut state.player_name);
+            if ui.button("Submit Score").clicked() {
+                // TODO: Submit score to leaderboard
+            }
+        });
     }
 }
