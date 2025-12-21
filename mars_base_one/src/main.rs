@@ -500,20 +500,14 @@ fn setup(
     ));
 }
 
-fn end_game(
-    //mut state: ResMut<NextState<GamePhase>>,
-    player_query: Query<&Transform, With<Player>>,
-) {
-    let Ok(transform) = player_query.single() else {
+fn end_game(mut state: ResMut<NextState<GamePhase>>, player_query: Query<&Player>) {
+    let Ok(player) = player_query.single() else {
         return;
     };
 
-    if transform.translation.y < -384.0
-        || transform.translation.y > 384.0
-        || transform.translation.x < -512.0
-        || transform.translation.x > 512.0
-    {
-        //state.set(GamePhase::GameOver);
+    if player.miners_saved == 20 {
+        // Win condition met
+        state.set(GamePhase::GameOver);
     }
 }
 fn movement(
