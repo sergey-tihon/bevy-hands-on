@@ -28,6 +28,7 @@ struct Player {
     miners_saved: u32,
     shields: i32,
     fuel: i32,
+    score: u32,
 }
 
 #[derive(Component)]
@@ -452,6 +453,7 @@ fn setup(
             miners_saved: 0,
             shields: 500,
             fuel: 100_000,
+            score: 0,
         },
         Velocity::default(),
         PhysicsPosition::new(Vec2::new(0.0, 200.0)),
@@ -716,6 +718,7 @@ fn score_display(player: Query<&Player>, mut egui_context: egui::EguiContexts) {
     };
 
     egui::egui::Window::new("Score").show(egui_context.ctx_mut(), |ui| {
+        ui.label(format!("Score: {}", player.score));
         ui.label(format!("Miners Saved: {}", player.miners_saved));
         ui.label(format!("Shields: {}", player.shields));
         ui.label(format!("Fuel: {}", player.fuel));
@@ -763,6 +766,14 @@ trait OnCollect {
 impl OnCollect for Miner {
     fn effect(player: &mut Player) {
         player.miners_saved += 1;
+
+        player.score += 1_000;
+        if player.shields > 0 {
+            player.score += player.shields as u32;
+        }
+        if player.fuel > 1_000 {
+            player.score += player.fuel as u32;
+        }
     }
 }
 
