@@ -878,14 +878,34 @@ fn final_score(
         state.score = Some(score.0);
     }
 
+    if state.submitted {
+        return;
+    }
+
     if let Some(score) = state.score {
         egui::egui::Window::new("Final Score").show(egui_context.ctx_mut(), |ui| {
             ui.label(format!("Your Final Score: {}", score));
             ui.label("Please enter your name:");
             ui.text_edit_singleline(&mut state.player_name);
             if ui.button("Submit Score").clicked() {
-                // TODO: Submit score to leaderboard
+                state.submitted = true;
+                let entry = HighScoreEntry {
+                    name: state.player_name.clone(),
+                    score,
+                };
+                std::thread::spawn(move || {
+                    ureq::post("http://localhost:3030/scoreSubmit")
+                        .timeout(std::time::Duration::from_secs(5))
+                        .send_json(entry)
+                        .expect("Failed to submit score");
+                });
             }
         });
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HighScoreEntry {
+    name: String,
+    score: u32,
 }

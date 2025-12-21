@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 bevy = "0.16"
 my_library = { path = "../my_library" }
+serde = { version = "1.0.228", features = ["derive"] }
+ureq = { version = "2", features = ["json"] }
