@@ -28,6 +28,7 @@ struct Player {
     miners_saved: u32,
     shields: i32,
     fuel: i32,
+    score: u32,
 }
 
 #[derive(Component)]
@@ -346,11 +347,19 @@ fn main() -> anyhow::Result<()> {
             collect_game_element_and_despawn::<Fuel, {BurstColor::Orange as u8}>,
             collect_game_element_and_despawn::<Battery, {BurstColor::Magenta as u8}>
         ],
-        exit => [cleanup::<GameElement>]
+        exit => [submit_score, cleanup::<GameElement>.after(submit_score)]
     );
 
     app.add_event::<Impulse>();
     app.add_event::<PhysicsTick>();
+
+    app.add_event::<FinalScore>();
+    app.add_systems(Update, final_score.run_if(in_state(GamePhase::GameOver)));
+    app.add_systems(
+        Update,
+        highscore_table.run_if(in_state(GamePhase::MainMenu)),
+    );
+
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Mars Base One".to_string(),
@@ -452,6 +461,7 @@ fn setup(
             miners_saved: 0,
             shields: 500,
             fuel: 100_000,
+            score: 0,
         },
         Velocity::default(),
         PhysicsPosition::new(Vec2::new(0.0, 200.0)),
@@ -716,6 +726,7 @@ fn score_display(player: Query<&Player>, mut egui_context: egui::EguiContexts) {
     };
 
     egui::egui::Window::new("Score").show(egui_context.ctx_mut(), |ui| {
+        ui.label(format!("Score: {}", player.score));
         ui.label(format!("Miners Saved: {}", player.miners_saved));
         ui.label(format!("Shields: {}", player.shields));
         ui.label(format!("Fuel: {}", player.fuel));
@@ -763,6 +774,14 @@ trait OnCollect {
 impl OnCollect for Miner {
     fn effect(player: &mut Player) {
         player.miners_saved += 1;
+
+        player.score += 1_000;
+        if player.shields > 0 {
+            player.score += player.shields as u32;
+        }
+        if player.fuel > 1_000 {
+            player.score += player.fuel as u32;
+        }
     }
 }
 
@@ -835,5 +854,106 @@ fn collect_game_element_and_despawn<T: Component + OnCollect, const COLOR: u8>(
             &mut spawn,
             2.0,
         );
+    }
+}
+
+#[derive(Event)]
+struct FinalScore(u32);
+
+fn submit_score(player: Query<&Player>, mut final_score: EventWriter<FinalScore>) {
+    for player in player.iter() {
+        final_score.write(FinalScore(player.score));
+    }
+}
+
+#[derive(Default)]
+struct ScoreState {
+    score: Option<u32>,
+    player_name: String,
+    submitted: bool,
+}
+
+fn final_score(
+    mut final_score: EventReader<FinalScore>,
+    mut state: Local<ScoreState>, // WOW, this is cool
+    mut egui_context: egui::EguiContexts,
+) {
+    for score in final_score.read() {
+        state.score = Some(score.0);
+    }
+
+    if state.submitted {
+        return;
+    }
+
+    if let Some(score) = state.score {
+        egui::egui::Window::new("Final Score").show(egui_context.ctx_mut(), |ui| {
+            ui.label(format!("Your Final Score: {}", score));
+            ui.label("Please enter your name:");
+            ui.text_edit_singleline(&mut state.player_name);
+            if ui.button("Submit Score").clicked() {
+                state.submitted = true;
+                let entry = HighScoreEntry {
+                    name: state.player_name.clone(),
+                    score,
+                };
+                std::thread::spawn(move || {
+                    ureq::post("http://localhost:3030/scoreSubmit")
+                        .timeout(std::time::Duration::from_secs(5))
+                        .send_json(entry)
+                        .expect("Failed to submit score");
+                });
+            }
+        });
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct HighScoreEntry {
+    name: String,
+    score: u32,
+}
+
+#[derive(Default)]
+struct HighScoreTableState {
+    entries: Option<HighScoreTable>,
+    receiver: Option<std::sync::mpsc::Receiver<HighScoreTable>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct HighScoreTable {
+    entries: Vec<HighScoreEntry>,
+}
+
+fn highscore_table(mut state: Local<HighScoreTableState>, mut egui_context: egui::EguiContexts) {
+    if state.receiver.is_none() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        state.receiver = Some(rx);
+
+        std::thread::spawn(move || {
+            let table = ureq::get("http://localhost:3030/highScores")
+                .timeout(std::time::Duration::from_secs(5))
+                .call()
+                .unwrap()
+                .into_json::<HighScoreTable>()
+                .unwrap();
+
+            let _ = tx.send(table);
+        });
+    } else {
+        if let Some(rx) = &state.receiver
+            && let Ok(table) = rx.try_recv()
+        {
+            state.entries = Some(table);
+        }
+    }
+
+    if let Some(table) = &state.entries {
+        egui::egui::Window::new("High Scores").show(egui_context.ctx_mut(), |ui| {
+            ui.label("High Scores:");
+            for entry in table.entries.iter() {
+                ui.label(format!("{} - {}", entry.name, entry.score));
+            }
+        });
     }
 }

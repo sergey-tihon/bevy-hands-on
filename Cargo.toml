@@ -7,7 +7,7 @@ edition = "2024"
 members = [
   "bouncy",
   "flappy_dragon",
-  "hello_bevy",
+  "hello_bevy", "highscore_server",
   "mars_base_one",
   "my_library",
   "pig"
